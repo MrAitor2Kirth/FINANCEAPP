@@ -1,0 +1,20 @@
+﻿@page "/"
+
+<div class="balance-panel">
+    <div class="balance-label">Saldo Total</div>
+    <div class="balance-amount">@saldoTotal.ToString("C")</div>
+</div>
+
+<div class="content">
+    <h2>Bienvenido a tu app de finanzas</h2>
+</div>
+
+@code {
+    private decimal saldoTotal = 0m;
+
+    protected override void OnInitialized()
+    {
+        // Aquí puedes cargar el saldo desde tu servicio o base de datos
+        saldoTotal = 1250.50m; // Valor de ejemplo
+    }
+}
