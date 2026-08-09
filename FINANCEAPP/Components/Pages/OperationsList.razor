@@ -1,0 +1,541 @@
+@page "/operations"
+@inject IOperationService OperationService
+
+<PageTitle>Operaciones Financieras</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="display-5 fw-bold text-primary">
+                        <i class="bi bi-graph-up-arrow me-2"></i>
+                        Operaciones Financieras
+                    </h1>
+                    <p class="lead text-muted">Gestión inline de operaciones de inversión</p>
+                </div>
+                <div>
+                    <button class="btn btn-success btn-lg" @onclick="AddNewOperation">
+                        <i class="bi bi-plus-circle me-2"></i>
+                        Nueva Operación
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <p class="mt-3 text-muted">Cargando operaciones...</p>
+        </div>
+    }
+    else if (operations == null || !operations.Any())
+    {
+        <div class="alert alert-info d-flex align-items-center" role="alert">
+            <i class="bi bi-info-circle-fill me-2"></i>
+            <div>
+                No hay operaciones registradas. Haga clic en "Nueva Operación" para comenzar.
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- Tarjetas de resumen -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card border-primary shadow-sm">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Total Operaciones</h6>
+                        <h3 class="card-title text-primary mb-0">@operations.Count</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-success shadow-sm">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Operaciones Abiertas</h6>
+                        <h3 class="card-title text-success mb-0">@openOperationsCount</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-secondary shadow-sm">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Operaciones Cerradas</h6>
+                        <h3 class="card-title text-secondary mb-0">@closedOperationsCount</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-info shadow-sm">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Total Invertido</h6>
+                        <h3 class="card-title text-info mb-0">@totalAmount.ToString("C2")</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabla de operaciones editable -->
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-table me-2"></i>Listado de Operaciones (Edición Inline)</h5>
+                <small><i class="bi bi-info-circle me-1"></i>Haga clic en los campos para editarlos directamente</small>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th scope="col" style="width: 50px;" class="text-center">#</th>
+                                <th scope="col" style="width: 250px;">Empresa</th>
+                                <th scope="col" style="width: 150px;">Tipo</th>
+                                <th scope="col" style="width: 150px;" class="text-center">Fecha Apertura</th>
+                                <th scope="col" style="width: 150px;" class="text-center">Fecha Cierre</th>
+                                <th scope="col" style="width: 130px;" class="text-end">Importe</th>
+                                <th scope="col" style="width: 100px;" class="text-center">Estado</th>
+                                <th scope="col" style="width: 140px;" class="text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var operation in operations)
+                            {
+                                @if (editingOperationId == operation.Id)
+                                {
+                                    <!-- Modo edición -->
+                                    <tr class="table-warning">
+                                        <td class="text-center align-middle">
+                                            <span class="badge bg-warning text-dark">@operation.Id</span>
+                                        </td>
+                                        <td>
+                                            <input type="text" 
+                                                   class="form-control form-control-sm" 
+                                                   @bind="editOperation.CompanyName" 
+                                                   placeholder="Nombre empresa" />
+                                        </td>
+                                        <td>
+                                            <select class="form-select form-select-sm" @bind="editOperation.Type">
+                                                <option value="Compra">Compra</option>
+                                                <option value="Venta">Venta</option>
+                                                <option value="Dividendo">Dividendo</option>
+                                                <option value="Traspaso">Traspaso</option>
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <InputDate class="form-control form-control-sm" 
+                                                       @bind-Value="editOperationDate" />
+                                        </td>
+                                        <td>
+                                            <InputDate class="form-control form-control-sm" 
+                                                       @bind-Value="editOperationCloseDate" />
+                                        </td>
+                                        <td>
+                                            <input type="number" 
+                                                   class="form-control form-control-sm text-end" 
+                                                   @bind="editOperation.Amount" 
+                                                   step="0.01"
+                                                   placeholder="0.00" />
+                                        </td>
+                                        <td class="text-center align-middle">
+                                            @if (editOperation.CloseDate.HasValue)
+                                            {
+                                                <span class="badge bg-secondary">Cerrada</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-success">Abierta</span>
+                                            }
+                                        </td>
+                                        <td class="text-center align-middle">
+                                            <div class="btn-group-sm d-flex gap-1" role="group">
+                                                <button type="button" 
+                                                        class="btn btn-success btn-sm" 
+                                                        @onclick="() => SaveOperation(operation.Id)"
+                                                        disabled="@isSaving"
+                                                        title="Guardar cambios">
+                                                    <i class="bi bi-check-lg"></i>
+                                                </button>
+                                                <button type="button" 
+                                                        class="btn btn-secondary btn-sm" 
+                                                        @onclick="CancelEdit"
+                                                        disabled="@isSaving"
+                                                        title="Cancelar">
+                                                    <i class="bi bi-x-lg"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    <!-- Modo visualización -->
+                                    <tr>
+                                        <td class="text-center align-middle">
+                                            <span class="badge bg-secondary">@operation.Id</span>
+                                        </td>
+                                        <td class="align-middle">
+                                            <strong>@operation.CompanyName</strong>
+                                        </td>
+                                        <td class="align-middle">
+                                            <span class="badge @GetTypeBadgeClass(operation.Type)">
+                                                @operation.Type
+                                            </span>
+                                        </td>
+                                        <td class="text-center align-middle">
+                                            @operation.Date.ToString("dd/MM/yyyy")
+                                        </td>
+                                        <td class="text-center align-middle">
+                                            @if (operation.CloseDate.HasValue)
+                                            {
+                                                @operation.CloseDate.Value.ToString("dd/MM/yyyy")
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">-</span>
+                                            }
+                                        </td>
+                                        <td class="text-end align-middle">
+                                            <strong class="text-primary">@operation.Amount.ToString("C2")</strong>
+                                        </td>
+                                        <td class="text-center align-middle">
+                                            @if (operation.IsClosed)
+                                            {
+                                                <span class="badge bg-secondary">
+                                                    <i class="bi bi-check-circle-fill me-1"></i>Cerrada
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-success">
+                                                    <i class="bi bi-arrow-clockwise me-1"></i>Abierta
+                                                </span>
+                                            }
+                                        </td>
+                                        <td class="text-center align-middle">
+                                            <div class="btn-group-sm d-flex gap-1" role="group">
+                                                <button type="button" 
+                                                        class="btn btn-warning btn-sm" 
+                                                        @onclick="() => StartEdit(operation)"
+                                                        disabled="@(editingOperationId.HasValue)"
+                                                        title="Editar">
+                                                    <i class="bi bi-pencil-fill"></i>
+                                                </button>
+                                                <button type="button" 
+                                                        class="btn btn-danger btn-sm" 
+                                                        @onclick="() => ConfirmDelete(operation)"
+                                                        disabled="@(editingOperationId.HasValue)"
+                                                        title="Eliminar">
+                                                    <i class="bi bi-trash-fill"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer text-muted">
+                <small>
+                    <i class="bi bi-info-circle me-1"></i>
+                    Mostrando @operations.Count operación(es) | 
+                    @if (editingOperationId.HasValue)
+                    {
+                        <span class="text-warning"><strong>Editando operación...</strong></span>
+                    }
+                    else
+                    {
+                        <span>Haga clic en el icono de lápiz para editar</span>
+                    }
+                </small>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Modal de confirmación de eliminación -->
+<div class="modal fade @(showDeleteModal ? "show d-block" : "")" 
+     tabindex="-1" 
+     style="@(showDeleteModal ? "background-color: rgba(0,0,0,0.5);" : "")">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    Confirmar Eliminación
+                </h5>
+                <button type="button" class="btn-close btn-close-white" @onclick="CancelDelete"></button>
+            </div>
+            <div class="modal-body">
+                @if (operationToDelete != null)
+                {
+                    <p class="mb-2">¿Está seguro que desea eliminar la siguiente operación?</p>
+                    <div class="alert alert-warning">
+                        <strong>Empresa:</strong> @operationToDelete.CompanyName<br/>
+                        <strong>Tipo:</strong> @operationToDelete.Type<br/>
+                        <strong>Importe:</strong> @operationToDelete.Amount.ToString("C2")<br/>
+                        <strong>Fecha:</strong> @operationToDelete.Date.ToString("dd/MM/yyyy")
+                    </div>
+                    <p class="text-danger mb-0">
+                        <i class="bi bi-exclamation-circle me-1"></i>
+                        <strong>Esta acción no se puede deshacer.</strong>
+                    </p>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" 
+                        class="btn btn-secondary" 
+                        @onclick="CancelDelete"
+                        disabled="@isDeleting">
+                    Cancelar
+                </button>
+                <button type="button" 
+                        class="btn btn-danger" 
+                        @onclick="DeleteOperation"
+                        disabled="@isDeleting">
+                    @if (isDeleting)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                        <span>Eliminando...</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-trash-fill me-2"></i>
+                        <span>Eliminar</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Lista de operaciones
+    private List<Operation>? operations;
+
+    // Estados del componente
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool isDeleting = false;
+    private bool showDeleteModal = false;
+
+    // Edición inline
+    private int? editingOperationId = null;
+    private Operation editOperation = new();
+    private DateTime editOperationDate = DateTime.Now;
+    private DateTime? editOperationCloseDate = null;
+
+    // Eliminación
+    private Operation? operationToDelete = null;
+
+    // Métricas calculadas
+    private int openOperationsCount => operations?.Count(o => !o.IsClosed) ?? 0;
+    private int closedOperationsCount => operations?.Count(o => o.IsClosed) ?? 0;
+    private decimal totalAmount => operations?.Sum(o => o.Amount) ?? 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadOperations();
+    }
+
+    private async Task LoadOperations()
+    {
+        try
+        {
+            isLoading = true;
+            operations = await OperationService.GetAllAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al cargar operaciones: {ex.Message}");
+            operations = new List<Operation>();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Añade una nueva operación a la lista en modo edición
+    /// </summary>
+    private void AddNewOperation()
+    {
+        var newOperation = new Operation
+        {
+            Id = 0, // ID temporal para nueva operación
+            CompanyName = "",
+            Type = "Compra",
+            Date = DateTime.Now,
+            Amount = 0m,
+            CreatedAt = DateTime.Now
+        };
+
+        operations?.Insert(0, newOperation);
+        StartEdit(newOperation);
+    }
+
+    /// <summary>
+    /// Inicia el modo edición para una operación
+    /// </summary>
+    private void StartEdit(Operation operation)
+    {
+        editingOperationId = operation.Id;
+        editOperation = new Operation
+        {
+            Id = operation.Id,
+            CompanyName = operation.CompanyName,
+            Type = operation.Type,
+            Date = operation.Date,
+            CloseDate = operation.CloseDate,
+            Amount = operation.Amount,
+            CreatedAt = operation.CreatedAt
+        };
+
+        editOperationDate = operation.Date;
+        editOperationCloseDate = operation.CloseDate;
+    }
+
+    /// <summary>
+    /// Cancela el modo edición
+    /// </summary>
+    private void CancelEdit()
+    {
+        // Si es una nueva operación (Id = 0), eliminarla de la lista
+        if (editingOperationId == 0)
+        {
+            operations?.RemoveAll(o => o.Id == 0);
+        }
+
+        editingOperationId = null;
+        editOperation = new();
+        editOperationDate = DateTime.Now;
+        editOperationCloseDate = null;
+    }
+
+    /// <summary>
+    /// Guarda los cambios de la operación
+    /// </summary>
+    private async Task SaveOperation(int operationId)
+    {
+        try
+        {
+            isSaving = true;
+
+            // Validaciones básicas
+            if (string.IsNullOrWhiteSpace(editOperation.CompanyName))
+            {
+                Console.WriteLine("El nombre de la empresa es obligatorio");
+                return;
+            }
+
+            if (editOperation.Amount <= 0)
+            {
+                Console.WriteLine("El importe debe ser mayor que 0");
+                return;
+            }
+
+            // Asignar fechas desde los campos de edición
+            editOperation.Date = editOperationDate;
+            editOperation.CloseDate = editOperationCloseDate;
+
+            if (operationId == 0)
+            {
+                // Nueva operación
+                var savedOperation = await OperationService.AddAsync(editOperation);
+                // Recargar la lista completa
+                await LoadOperations();
+            }
+            else
+            {
+                // Actualizar operación existente
+                var success = await OperationService.UpdateAsync(editOperation);
+                if (success)
+                {
+                    // Actualizar en la lista local
+                    var index = operations?.FindIndex(o => o.Id == operationId);
+                    if (index >= 0 && operations != null)
+                    {
+                        operations[index.Value] = editOperation;
+                    }
+                }
+            }
+
+            // Salir del modo edición
+            editingOperationId = null;
+            editOperation = new();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al guardar operación: {ex.Message}");
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    /// <summary>
+    /// Muestra el modal de confirmación de eliminación
+    /// </summary>
+    private void ConfirmDelete(Operation operation)
+    {
+        operationToDelete = operation;
+        showDeleteModal = true;
+    }
+
+    /// <summary>
+    /// Cancela la eliminación
+    /// </summary>
+    private void CancelDelete()
+    {
+        operationToDelete = null;
+        showDeleteModal = false;
+    }
+
+    /// <summary>
+    /// Elimina la operación seleccionada
+    /// </summary>
+    private async Task DeleteOperation()
+    {
+        if (operationToDelete == null) return;
+
+        try
+        {
+            isDeleting = true;
+            var success = await OperationService.DeleteAsync(operationToDelete.Id);
+
+            if (success)
+            {
+                await LoadOperations();
+                showDeleteModal = false;
+                operationToDelete = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al eliminar operación: {ex.Message}");
+        }
+        finally
+        {
+            isDeleting = false;
+        }
+    }
+
+    private string GetTypeBadgeClass(string type)
+    {
+        return type?.ToLower() switch
+        {
+            "compra" => "bg-success",
+            "venta" => "bg-danger",
+            "dividendo" => "bg-info",
+            "traspaso" => "bg-warning text-dark",
+            _ => "bg-primary"
+        };
+    }
+}

@@ -1,0 +1,137 @@
+@page "/dashboard"
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject IDashboardService DashboardService
+@inject NavigationManager Navigation
+@inject ILogger<FinancialDashboard> Logger
+
+<PageTitle>Dashboard Financiero</PageTitle>
+
+<div class="container-fluid mt-4">
+    @if (isLoading)
+    {
+        <div class="text-center p-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Cargando datos...</span>
+            </div>
+        </div>
+    }
+    else if (summary != null)
+    {
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h1>Dashboard Financiero</h1>
+                        <p class="lead text-muted">Gestión integral de tu patrimonio - Actualizado: @summary.LastUpdate.ToString("dd/MM/yyyy HH:mm")</p>
+                    </div>
+                    <button class="btn btn-outline-primary" @onclick="RefreshDashboard">
+                        <span class="oi oi-reload"></span> Actualizar
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-6 col-lg-3">
+                <div class="card border-success shadow-sm">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Patrimonio Total</h6>
+                        <h3 class="text-success fw-bold">@summary.TotalPatrimony.ToString("C")</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <div class="card border-primary shadow-sm">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Efectivo Bancario</h6>
+                        <h3 class="text-primary fw-bold">@summary.BankTotal.ToString("C")</h3>
+                        <small class="text-muted">@summary.BankAccountsCount cuentas</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <div class="card border-info shadow-sm">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Acciones</h6>
+                        <h3 class="text-info fw-bold">@summary.AccionesTotal.ToString("C")</h3>
+                        <small class="text-muted">@summary.CompaniesCount empresas</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <div class="card border-warning shadow-sm">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Fondos Inversión</h6>
+                        <h3 class="text-warning fw-bold">@summary.FundsTotal.ToString("C")</h3>
+                        <small class="text-muted">@summary.FundsCount fondos</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <h5>Acceso Rápido a Módulos</h5>
+            </div>
+            <div class="col-md-3 mb-2">
+                <button class="btn btn-outline-primary w-100" @onclick="NavigateToFunds">
+                    Fondos de Inversión
+                </button>
+            </div>
+            <div class="col-md-3 mb-2">
+                <button class="btn btn-outline-success w-100" @onclick="NavigateToBank">
+                    Cuentas Bancarias
+                </button>
+            </div>
+            <div class="col-md-3 mb-2">
+                <button class="btn btn-outline-warning w-100" @onclick="NavigateToRefugio">
+                    Activos Refugio
+                </button>
+            </div>
+            <div class="col-md-3 mb-2">
+                <button class="btn btn-outline-info w-100" @onclick="NavigateToProperties">
+                    Propiedades
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private DashboardSummary? summary;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboard();
+    }
+
+    private async Task LoadDashboard()
+    {
+        try
+        {
+            isLoading = true;
+            summary = await DashboardService.GetDashboardSummaryAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error cargando dashboard");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RefreshDashboard()
+    {
+        await LoadDashboard();
+    }
+
+    private void NavigateToFunds() => Navigation.NavigateTo("/fondos");
+    private void NavigateToBank() => Navigation.NavigateTo("/banco");
+    private void NavigateToRefugio() => Navigation.NavigateTo("/activos-refugio");
+    private void NavigateToProperties() => Navigation.NavigateTo("/inmuebles");
+}

@@ -1,0 +1,248 @@
+@page "/fondos/nuevo"
+@page "/fondos/editar/{id:int}"
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject IFundService FundService
+@inject NavigationManager Navigation
+@inject ILogger<FundForm> Logger
+
+<PageTitle>@(Id == 0 ? "Nuevo Fondo" : "Editar Fondo")</PageTitle>
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">@(Id == 0 ? "Crear Nuevo Fondo" : "Editar Fondo")</h5>
+                </div>
+
+                <div class="card-body">
+                    @if (fund == null)
+                    {
+                        <div class="alert alert-info">Cargando...</div>
+                    }
+                    else
+                    {
+                        <EditForm Model="@fund" OnValidSubmit="@HandleSubmit" OnInvalidSubmit="@HandleInvalidSubmit">
+                            <DataAnnotationsValidator />
+
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Nombre del Fondo *</label>
+                                    <InputText class="form-control" placeholder="Ej: Fondos Índice S&P 500"
+                                              @bind-Value="fund.Name" />
+                                    <ValidationMessage For="@(() => fund.Name)" class="text-danger" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">ISIN *</label>
+                                    <InputText class="form-control" placeholder="Ej: IE00B4L5Y983"
+                                              @bind-Value="fund.ISIN" />
+                                    <ValidationMessage For="@(() => fund.ISIN)" class="text-danger" />
+                                </div>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Tipo de Fondo *</label>
+                                    <InputSelect class="form-select" @bind-Value="fund.FundType">
+                                        <option value="">Seleccionar tipo...</option>
+                                        <option value="Renta Variable">Renta Variable</option>
+                                        <option value="Renta Fija">Renta Fija</option>
+                                        <option value="Mixto">Mixto</option>
+                                        <option value="Monetario">Monetario</option>
+                                        <option value="Índice">Índice</option>
+                                        <option value="Temático">Temático</option>
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => fund.FundType)" class="text-danger" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Gestor/Entidad *</label>
+                                    <InputText class="form-control" placeholder="Ej: Vanguard, iShares"
+                                              @bind-Value="fund.Manager" />
+                                    <ValidationMessage For="@(() => fund.Manager)" class="text-danger" />
+                                </div>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Comisión (TER) % *</label>
+                                    <InputNumber class="form-control" placeholder="Ej: 0.25"
+                                               @bind-Value="fund.TER" step="0.01" />
+                                    <ValidationMessage For="@(() => fund.TER)" class="text-danger" />
+                                    <small class="text-muted">Total Expense Ratio - comisión anual</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Rentabilidad Histórica (%) *</label>
+                                    <InputNumber class="form-control" placeholder="Ej: 6.5"
+                                               @bind-Value="fund.HistoricalReturn" step="0.01" />
+                                    <ValidationMessage For="@(() => fund.HistoricalReturn)" class="text-danger" />
+                                    <small class="text-muted">Rendimiento histórico anualizado</small>
+                                </div>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-12">
+                                    <div class="card bg-light">
+                                        <div class="card-body">
+                                            <h6 class="card-title">Información de Inversión</h6>
+                                            <div class="row">
+                                                <div class="col-md-4">
+                                                    <dl class="row">
+                                                        <dt class="col-sm-6">Total Invertido:</dt>
+                                                        <dd class="col-sm-6">@fund.TotalInvested.ToString("C")</dd>
+                                                    </dl>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <dl class="row">
+                                                        <dt class="col-sm-6">Valor Actual:</dt>
+                                                        <dd class="col-sm-6">@fund.CurrentValue.ToString("C")</dd>
+                                                    </dl>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <dl class="row">
+                                                        <dt class="col-sm-6">Rentabilidad:</dt>
+                                                        <dd class="col-sm-6">
+                                                            @if (fund.CurrentReturn >= 0)
+                                                            {
+                                                                <span class="badge bg-success">@fund.FormattedCurrentReturn</span>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="badge bg-danger">@fund.FormattedCurrentReturn</span>
+                                                            }
+                                                        </dd>
+                                                    </dl>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(errorMessage))
+                            {
+                                <div class="alert alert-danger" role="alert">
+                                    @errorMessage
+                                </div>
+                            }
+
+                            <div class="d-flex gap-2">
+                                <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
+                                    @if (isSubmitting)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-2"></span>
+                                    }
+                                    @(Id == 0 ? "Crear Fondo" : "Guardar Cambios")
+                                </button>
+                                <button type="button" class="btn btn-secondary" @onclick="NavigateBack">
+                                    Cancelar
+                                </button>
+                            </div>
+                        </EditForm>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">Información</h6>
+                </div>
+                <div class="card-body">
+                    <p class="small">
+                        <strong>Campos requeridos:</strong> Nombre, ISIN, Tipo, Gestor, TER y Rentabilidad Histórica.
+                    </p>
+                    <p class="small">
+                        <strong>TER (Total Expense Ratio):</strong> Es la comisión anual que cobra el gestor del fondo, expresada como porcentaje del patrimonio.
+                    </p>
+                    <p class="small">
+                        <strong>Rentabilidad Histórica:</strong> Rendimiento promedio anual que ha tenido el fondo en el pasado (referencial).
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private Fund fund = new();
+    private bool isSubmitting = false;
+    private string errorMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (Id > 0)
+            {
+                var existingFund = await FundService.GetFundByIdAsync(Id);
+                if (existingFund != null)
+                {
+                    fund = existingFund;
+                }
+                else
+                {
+                    errorMessage = "Fondo no encontrado";
+                }
+            }
+            else
+            {
+                fund = new Fund
+                {
+                    CreatedAt = DateTime.Now,
+                    UpdatedAt = DateTime.Now
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error cargando fondo");
+            errorMessage = "Error al cargar el fondo";
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSubmitting = true;
+        errorMessage = string.Empty;
+
+        try
+        {
+            fund.UpdatedAt = DateTime.Now;
+
+            if (Id == 0)
+            {
+                fund.CreatedAt = DateTime.Now;
+                await FundService.CreateFundAsync(fund);
+            }
+            else
+            {
+                fund.Id = Id;
+                await FundService.UpdateFundAsync(fund);
+            }
+
+            Navigation.NavigateTo("/fondos");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error guardando fondo");
+            errorMessage = $"Error al guardar el fondo: {ex.Message}";
+            isSubmitting = false;
+        }
+    }
+
+    private void HandleInvalidSubmit()
+    {
+        errorMessage = "Por favor completa todos los campos requeridos correctamente";
+    }
+
+    private void NavigateBack()
+    {
+        Navigation.NavigateTo("/fondos");
+    }
+}

@@ -1,0 +1,150 @@
+@* Componente base reutilizable para listas de datos con operaciones CRUD comunes *@
+@typeparam TItem
+
+<div class="data-table-container">
+    <div class="table-header">
+        <h3>@Title</h3>
+        @if (!string.IsNullOrEmpty(AddButtonLabel))
+        {
+            <button class="btn btn-primary" @onclick="OnAddClick">
+                <span class="oi oi-plus"></span> @AddButtonLabel
+            </button>
+        }
+    </div>
+
+    @if (Items != null && Items.Count > 0)
+    {
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        @ChildContent
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Items)
+                    {
+                        <tr>
+                            @ItemTemplate?.Invoke(item)
+                        </tr>
+                        @if (OperationsTemplate != null)
+                        {
+                            <tr class="operations-row">
+                                <td colspan="100%">
+                                    <div class="btn-group" role="group">
+                                        @OperationsTemplate(item)
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-info">
+            <span class="oi oi-info"></span> No hay registros disponibles
+        </div>
+    }
+
+    @if (ShowPagination && Items != null && TotalItems > PageSize)
+    {
+        <nav aria-label="Paginación">
+            <ul class="pagination">
+                @for (int i = 1; i <= Math.Ceiling((double)TotalItems / PageSize); i++)
+                {
+                    int pageNum = i;
+                    <li class="page-item @(CurrentPage == pageNum ? "active" : "")">
+                        <button class="page-link" @onclick="() => OnPageChange(pageNum)">@pageNum</button>
+                    </li>
+                }
+            </ul>
+        </nav>
+    }
+</div>
+
+<style>
+    .data-table-container {
+        margin: 20px 0;
+    }
+
+    .table-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .table-header h3 {
+        margin: 0;
+        color: #2c3e50;
+    }
+
+    .operations-row {
+        background-color: #f8f9fa;
+    }
+
+    .btn-group {
+        display: flex;
+        gap: 10px;
+        padding: 10px;
+    }
+
+    .table-responsive {
+        overflow-x: auto;
+    }
+
+    .pagination {
+        margin-top: 20px;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public string Title { get; set; } = "Tabla de Datos";
+
+    [Parameter]
+    public string AddButtonLabel { get; set; }
+
+    [Parameter]
+    public List<TItem> Items { get; set; } = new();
+
+    [Parameter]
+    public RenderFragment ChildContent { get; set; }
+
+    [Parameter]
+    public RenderFragment<TItem> ItemTemplate { get; set; }
+
+    [Parameter]
+    public RenderFragment<TItem> OperationsTemplate { get; set; }
+
+    [Parameter]
+    public EventCallback OnAddButtonClicked { get; set; }
+
+    [Parameter]
+    public int PageSize { get; set; } = 10;
+
+    [Parameter]
+    public int CurrentPage { get; set; } = 1;
+
+    [Parameter]
+    public int TotalItems { get; set; }
+
+    [Parameter]
+    public bool ShowPagination { get; set; } = true;
+
+    [Parameter]
+    public EventCallback<int> OnPageChangeCallback { get; set; }
+
+    private async Task OnAddClick()
+    {
+        await OnAddButtonClicked.InvokeAsync();
+    }
+
+    private async Task OnPageChange(int page)
+    {
+        await OnPageChangeCallback.InvokeAsync(page);
+    }
+}

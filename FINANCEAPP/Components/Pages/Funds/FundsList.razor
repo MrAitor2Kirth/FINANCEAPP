@@ -1,0 +1,217 @@
+@page "/fondos"
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject IFundService FundService
+@inject NavigationManager Navigation
+@inject ILogger<FundsList> Logger
+
+<PageTitle>Fondos de Inversión</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1>Gestión de Fondos de Inversión</h1>
+            <p class="text-muted">Administra tus fondos de inversión y realiza un seguimiento de sus operaciones</p>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="alert alert-info">
+            <span class="spinner-border spinner-border-sm me-2"></span> Cargando fondos...
+        </div>
+    }
+    else if (funds == null || funds.Count == 0)
+    {
+        <div class="alert alert-warning">
+            <span class="oi oi-warning"></span> No hay fondos registrados
+            <button class="btn btn-primary ms-3" @onclick="NavigateToNew">
+                Crear primer fondo
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="row mb-3">
+            <div class="col-12">
+                <button class="btn btn-primary" @onclick="NavigateToNew">
+                    <span class="oi oi-plus"></span> Nuevo Fondo
+                </button>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Tipo</th>
+                        <th>Gestor</th>
+                        <th>TER (%)</th>
+                        <th>Total Invertido</th>
+                        <th>Valor Actual</th>
+                        <th>Rentabilidad</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var fund in funds)
+                    {
+                        <tr>
+                            <td>
+                                <strong>@fund.Name</strong>
+                                <br />
+                                <small class="text-muted">ISIN: @fund.ISIN</small>
+                            </td>
+                            <td>@fund.FundType</td>
+                            <td>@fund.Manager</td>
+                            <td>@fund.FormattedTER</td>
+                            <td class="text-end">@fund.TotalInvested.ToString("C")</td>
+                            <td class="text-end">
+                                <strong>@fund.CurrentValue.ToString("C")</strong>
+                            </td>
+                            <td class="text-end">
+                                @if (fund.CurrentReturn >= 0)
+                                {
+                                    <span class="badge bg-success">@fund.FormattedCurrentReturn</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-danger">@fund.FormattedCurrentReturn</span>
+                                }
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => NavigateToDetail(fund.Name)">
+                                    <span class="oi oi-eye"></span>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => NavigateToEdit(fund.Id)">
+                                    <span class="oi oi-pencil"></span>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteFund(fund.Id)">
+                                    <span class="oi oi-trash"></span>
+                                </button>
+                            </td>
+                        </tr>
+
+                        @if (expandedFundId == fund.Id)
+                        {
+                            <tr class="table-secondary">
+                                <td colspan="8">
+                                    <div class="p-3">
+                                        <h6 class="mb-3">Operaciones del Fondo</h6>
+
+                                        <ul class="nav nav-tabs mb-3" role="tablist">
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link @(selectedPlusvaliaOption == "A" ? "active" : "")" 
+                                                        @onclick='() => selectedPlusvaliaOption = "A"' type="button">
+                                                    Opción A - Operación de Plusvalía
+                                                </button>
+                                            </li>
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link @(selectedPlusvaliaOption == "B" ? "active" : "")" 
+                                                        @onclick='() => selectedPlusvaliaOption = "B"' type="button">
+                                                    Opción B - Historial de Valores
+                                                </button>
+                                            </li>
+                                        </ul>
+
+                                        @if (selectedPlusvaliaOption == "A")
+                                        {
+                                            <div class="tab-pane active">
+                                                <h6 class="mb-2">Operaciones Estándar</h6>
+                                                <OperationsList FundName="@fund.Name" FundService="@FundService" OnOperationAdded="@RefreshFunds" />
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="tab-pane active">
+                                                <h6 class="mb-2">Historial de Valores</h6>
+                                                <ValueHistoryList FundName="@fund.Name" FundService="@FundService" OnHistoryAdded="@RefreshFunds" />
+                                            </div>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<Fund> funds = new();
+    private bool isLoading = true;
+    private int? expandedFundId = null;
+    private string selectedPlusvaliaOption = "A";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await RefreshFunds();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al cargar fondos");
+        }
+    }
+
+    private async Task RefreshFunds()
+    {
+        isLoading = true;
+        try
+        {
+            funds = await FundService.GetAllFundsAsync();
+            isLoading = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al refrescar fondos");
+            isLoading = false;
+        }
+    }
+
+    private void NavigateToDetail(string fundName)
+    {
+        if (expandedFundId == null)
+        {
+            expandedFundId = funds.FirstOrDefault(f => f.Name == fundName)?.Id;
+        }
+        else
+        {
+            expandedFundId = null;
+        }
+    }
+
+    private void NavigateToEdit(int fundId)
+    {
+        Navigation.NavigateTo($"/fondos/editar/{fundId}");
+    }
+
+    private async Task DeleteFund(int fundId)
+    {
+        if (await JSRuntime.InvokeAsync<bool>("confirm", "¿Estás seguro de que deseas eliminar este fondo?"))
+        {
+            try
+            {
+                await FundService.DeleteFundAsync(fundId);
+                await RefreshFunds();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error al eliminar fondo");
+            }
+        }
+    }
+
+    private void NavigateToNew()
+    {
+        Navigation.NavigateTo("/fondos/nuevo");
+    }
+
+    [Inject]
+    private IJSRuntime JSRuntime { get; set; }
+}

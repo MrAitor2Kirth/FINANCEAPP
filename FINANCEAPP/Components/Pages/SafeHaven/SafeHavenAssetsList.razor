@@ -1,0 +1,239 @@
+@page "/activos-refugio"
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject ISafeHavenService SafeHavenService
+@inject NavigationManager Navigation
+@inject ILogger<SafeHavenAssetsList> Logger
+
+<PageTitle>Activos Refugio</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1>Gestión de Activos Refugio</h1>
+            <p class="text-muted">Administra inversiones en oro, plata, bitcoin y otros activos refugio</p>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="alert alert-info">
+            <span class="spinner-border spinner-border-sm me-2"></span> Cargando activos...
+        </div>
+    }
+    else if (assets == null || assets.Count == 0)
+    {
+        <div class="alert alert-warning">
+            <span class="oi oi-warning"></span> No hay activos refugio registrados
+            <button class="btn btn-primary ms-3" @onclick="NavigateToNew">
+                Crear primer activo
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="row mb-3">
+            <div class="col-12">
+                <button class="btn btn-primary" @onclick="NavigateToNew">
+                    <span class="oi oi-plus"></span> Nuevo Activo
+                </button>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-warning text-dark">
+                        <h6 class="mb-0">Desglose por Tipo de Activo</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            @foreach (var breakdown in assetBreakdown)
+                            {
+                                <div class="col-md-3 mb-3">
+                                    <div class="card border-warning">
+                                        <div class="card-body text-center">
+                                            <h6 class="card-title">@breakdown.Key</h6>
+                                            <h5 class="text-warning">@breakdown.Value.ToString("C")</h5>
+                                            <small class="text-muted">
+                                                @(assets.Count(a => a.AssetType == breakdown.Key)) activos
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Tipo de Activo</th>
+                        <th>Total Invertido</th>
+                        <th>% del Total</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var asset in assets.OrderByDescending(a => a.TotalInvested))
+                    {
+                        decimal percentage = totalInvested > 0 ? (asset.TotalInvested / totalInvested) * 100 : 0;
+
+                        <tr>
+                            <td>
+                                <strong>@asset.Name</strong>
+                            </td>
+                            <td>
+                                <span class="badge @GetAssetTypeBadgeClass(asset.AssetType)">
+                                    @asset.AssetType
+                                </span>
+                            </td>
+                            <td class="text-end">@asset.TotalInvested.ToString("C")</td>
+                            <td class="text-end">
+                                <div class="progress" style="height: 20px;">
+                                    <div class="progress-bar" role="progressbar" 
+                                         style="width: @(percentage)%">
+                                        @(percentage.ToString("F1"))%
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => NavigateToDetail(asset.Id)">
+                                    <span class="oi oi-eye"></span>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => NavigateToEdit(asset.Id)">
+                                    <span class="oi oi-pencil"></span>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsset(asset.Id)">
+                                    <span class="oi oi-trash"></span>
+                                </button>
+                            </td>
+                        </tr>
+
+                        @if (expandedAssetId == asset.Id)
+                        {
+                            <tr class="table-secondary">
+                                <td colspan="5">
+                                    <div class="p-3">
+                                        <h6 class="mb-3">Operaciones del Activo</h6>
+                                        <SafeHavenOperationsList AssetName="@asset.Name" SafeHavenService="@SafeHavenService" OnOperationAdded="@RefreshAssets" />
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<SafeHavenAsset> assets = new();
+    private bool isLoading = true;
+    private int? expandedAssetId = null;
+    private decimal totalInvested = 0;
+    private Dictionary<string, decimal> assetBreakdown = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await RefreshAssets();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al cargar activos");
+        }
+    }
+
+    private async Task RefreshAssets()
+    {
+        isLoading = true;
+        try
+        {
+            assets = await SafeHavenService.GetAllAssetsAsync();
+            totalInvested = assets.Sum(a => a.TotalInvested);
+
+            // Calcular desglose por tipo
+            assetBreakdown = new Dictionary<string, decimal>();
+            foreach (var asset in assets)
+            {
+                if (assetBreakdown.ContainsKey(asset.AssetType))
+                {
+                    assetBreakdown[asset.AssetType] += asset.TotalInvested;
+                }
+                else
+                {
+                    assetBreakdown[asset.AssetType] = asset.TotalInvested;
+                }
+            }
+
+            isLoading = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al refrescar activos");
+            isLoading = false;
+        }
+    }
+
+    private void NavigateToDetail(int assetId)
+    {
+        if (expandedAssetId == assetId)
+        {
+            expandedAssetId = null;
+        }
+        else
+        {
+            expandedAssetId = assetId;
+        }
+    }
+
+    private void NavigateToEdit(int assetId)
+    {
+        Navigation.NavigateTo($"/activos-refugio/editar/{assetId}");
+    }
+
+    private async Task DeleteAsset(int assetId)
+    {
+        if (await JSRuntime.InvokeAsync<bool>("confirm", "¿Estás seguro de que deseas eliminar este activo?"))
+        {
+            try
+            {
+                await SafeHavenService.DeleteAssetAsync(assetId);
+                await RefreshAssets();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error al eliminar activo");
+            }
+        }
+    }
+
+    private void NavigateToNew()
+    {
+        Navigation.NavigateTo("/activos-refugio/nuevo");
+    }
+
+    private string GetAssetTypeBadgeClass(string assetType)
+    {
+        return assetType switch
+        {
+            "Oro" => "bg-warning",
+            "Plata" => "bg-secondary",
+            "Bitcoin" => "bg-danger",
+            "Ethereum" => "bg-info",
+            _ => "bg-dark"
+        };
+    }
+
+    [Inject]
+    private IJSRuntime JSRuntime { get; set; }
+}

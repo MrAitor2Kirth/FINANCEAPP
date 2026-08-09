@@ -1,0 +1,136 @@
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject ILogger<SafeHavenOperationsList> Logger
+
+@if (operations == null)
+{
+    <div class="alert alert-info">Cargando operaciones...</div>
+}
+else if (operations.Count == 0)
+{
+    <div class="alert alert-warning">No hay operaciones registradas</div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered">
+            <thead>
+                <tr>
+                    <th>Tipo</th>
+                    <th>Cantidad</th>
+                    <th>Fecha</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var op in operations.OrderByDescending(x => x.Date))
+                {
+                    <tr class="@(op.Type == "Compra" ? "table-success" : "table-danger")">
+                        <td>
+                            <span class="badge @(op.Type == "Compra" ? "bg-success" : "bg-danger")">@op.Type</span>
+                        </td>
+                        <td class="text-end fw-bold">@op.Amount.ToString("C")</td>
+                        <td>@op.Date.ToString("dd/MM/yyyy")</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteOperation(op.Id)">
+                                Eliminar
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<div class="mt-3">
+    <h6>Nueva Operación</h6>
+    <div class="row g-2">
+        <div class="col-md-4">
+            <select class="form-select form-select-sm" @bind="newOperation.Type">
+                <option value="">Seleccionar tipo...</option>
+                <option value="Compra">Compra</option>
+                <option value="Venta">Venta</option>
+            </select>
+        </div>
+        <div class="col-md-4">
+            <input type="number" class="form-control form-control-sm" placeholder="Cantidad" 
+                   @bind="newOperation.Amount" step="0.01" />
+        </div>
+        <div class="col-md-4">
+            <input type="date" class="form-control form-control-sm" @bind="newOperation.Date" />
+        </div>
+    </div>
+    <div class="row g-2 mt-2">
+        <div class="col-12">
+            <button class="btn btn-sm btn-primary w-100" @onclick="AddOperation">Añadir Operación</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string AssetName { get; set; }
+
+    [Parameter]
+    public ISafeHavenService SafeHavenService { get; set; }
+
+    [Parameter]
+    public EventCallback OnOperationAdded { get; set; }
+
+    private List<SafeHavenOperation> operations = new();
+    private SafeHavenOperation newOperation = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadOperations();
+    }
+
+    private async Task LoadOperations()
+    {
+        try
+        {
+            operations = await SafeHavenService.GetOperationsByAssetNameAsync(AssetName);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error cargando operaciones");
+        }
+    }
+
+    private async Task AddOperation()
+    {
+        if (string.IsNullOrEmpty(newOperation.Type) || newOperation.Amount <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            newOperation.AssetName = AssetName;
+            await SafeHavenService.CreateOperationAsync(newOperation);
+            newOperation = new();
+            await LoadOperations();
+            await OnOperationAdded.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error añadiendo operación");
+        }
+    }
+
+    private async Task DeleteOperation(int operationId)
+    {
+        try
+        {
+            await SafeHavenService.DeleteOperationAsync(operationId);
+            await LoadOperations();
+            await OnOperationAdded.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error eliminando operación");
+        }
+    }
+}

@@ -1,0 +1,125 @@
+using FINANCEAPP.Models;
+
+namespace FINANCEAPP.Services
+{
+    /// <summary>
+    /// Interfaz para el Dashboard agregador de todas las categorías
+    /// </summary>
+    public interface IDashboardService
+    {
+        /// <summary>
+        /// Obtiene un resumen consolidado del patrimonio
+        /// </summary>
+        Task<DashboardSummary> GetDashboardSummaryAsync();
+
+        /// <summary>
+        /// Obtiene el patrimonio total del usuario
+        /// </summary>
+        Task<decimal> GetTotalPatrimonyAsync();
+
+        /// <summary>
+        /// Obtiene el desglose del patrimonio por categoría
+        /// </summary>
+        Task<Dictionary<string, decimal>> GetPatrimonyByAssetClassAsync();
+
+        /// <summary>
+        /// Obtiene la rentabilidad total agregada
+        /// </summary>
+        Task<PortfolioPerformance> GetPortfolioPerformanceAsync();
+
+        /// <summary>
+        /// Obtiene estadísticas de ingresos y gastos
+        /// </summary>
+        Task<IncomeExpenseStats> GetIncomeExpenseStatsAsync();
+
+        /// <summary>
+        /// Obtiene operaciones recientes de todas las categorías
+        /// </summary>
+        Task<List<RecentOperation>> GetRecentOperationsAsync(int limit = 10);
+
+        /// <summary>
+        /// Obtiene alertas o informaciones importantes
+        /// </summary>
+        Task<List<DashboardAlert>> GetDashboardAlertsAsync();
+    }
+
+    /// <summary>
+    /// Resumen del dashboard con todos los totales agregados
+    /// </summary>
+    public class DashboardSummary
+    {
+        public decimal TotalPatrimony { get; set; }
+        public decimal AccionesTotal { get; set; }
+        public decimal FundsTotal { get; set; }
+        public decimal BankTotal { get; set; }
+        public decimal SafeHavenTotal { get; set; }
+        public decimal RealEstateTotal { get; set; }
+
+        public int CompaniesCount { get; set; }
+        public int FundsCount { get; set; }
+        public int BankAccountsCount { get; set; }
+        public int SafeHavenAssetsCount { get; set; }
+        public int PropertiesCount { get; set; }
+
+        public DateTime LastUpdate { get; set; }
+    }
+
+    /// <summary>
+    /// Información sobre el rendimiento del portafolio
+    /// </summary>
+    public class PortfolioPerformance
+    {
+        public decimal TotalInvested { get; set; }
+        public decimal CurrentValue { get; set; }
+        public decimal TotalReturn { get; set; }
+        public decimal ReturnPercentage { get; set; }
+        public List<AssetClassPerformance> ByAssetClass { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Rendimiento por clase de activo
+    /// </summary>
+    public class AssetClassPerformance
+    {
+        public string AssetClass { get; set; } = string.Empty;
+        public decimal Invested { get; set; }
+        public decimal CurrentValue { get; set; }
+        public decimal Return { get; set; }
+        public decimal ReturnPercentage { get; set; }
+    }
+
+    /// <summary>
+    /// Estadísticas de ingresos y gastos
+    /// </summary>
+    public class IncomeExpenseStats
+    {
+        public decimal TotalIncome { get; set; }
+        public decimal TotalExpenses { get; set; }
+        public decimal NetCashFlow { get; set; }
+        public Dictionary<string, decimal> IncomeBySource { get; set; } = new();
+        public Dictionary<string, decimal> ExpensesByCategory { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Operación reciente de cualquier categoría
+    /// </summary>
+    public class RecentOperation
+    {
+        public string Category { get; set; } = string.Empty; // "Acciones", "Fondos", "Banco", "SafeHaven", "RealEstate"
+        public string Description { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public DateTime Date { get; set; }
+        public string Type { get; set; } = string.Empty; // "Compra", "Venta", "Ingreso", "Gasto", etc.
+    }
+
+    /// <summary>
+    /// Alertas del dashboard
+    /// </summary>
+    public class DashboardAlert
+    {
+        public string Level { get; set; } = "info"; // "info", "warning", "danger"
+        public string Title { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+    }
+}

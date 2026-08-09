@@ -1,4 +1,7 @@
 ﻿@page "/"
+@using FINANCEAPP.Services
+@inject IFinancialService FinancialService
+@inject NavigationManager Navigation
 
 <div class="balance-panel">
     <div class="balance-label">Saldo Total</div>
@@ -7,14 +10,63 @@
 
 <div class="content">
     <h2>Bienvenido a tu app de finanzas</h2>
+    <p class="lead">Gestiona tus inversiones de manera profesional</p>
+
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title text-primary">
+                        <i class="bi bi-graph-up-arrow"></i> Dashboard Financiero
+                    </h5>
+                    <p class="card-text">
+                        Accede al dashboard completo con todos tus registros financieros,
+                        crea nuevos registros y edita los existentes.
+                    </p>
+                    <button class="btn btn-primary" @onclick="GoToDashboard">
+                        <i class="bi bi-arrow-right-circle"></i> Ir al Dashboard
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title text-success">
+                        <i class="bi bi-check-circle"></i> Funcionalidades
+                    </h5>
+                    <ul class="list-unstyled">
+                        <li><i class="bi bi-check text-success"></i> Crear registros financieros</li>
+                        <li><i class="bi bi-check text-success"></i> Editar registros existentes</li>
+                        <li><i class="bi bi-check text-success"></i> Eliminar registros con confirmación</li>
+                        <li><i class="bi bi-check text-success"></i> Visualiza tu patrimonio total</li>
+                        <li><i class="bi bi-check text-success"></i> Historial completo de inversiones</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 @code {
     private decimal saldoTotal = 0m;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        // Aquí puedes cargar el saldo desde tu servicio o base de datos
-        saldoTotal = 1250.50m; // Valor de ejemplo
+        // Cargar el saldo total desde el servicio
+        try
+        {
+            saldoTotal = await FinancialService.GetTotalBalanceAsync();
+        }
+        catch
+        {
+            saldoTotal = 0m;
+        }
+    }
+
+    private void GoToDashboard()
+    {
+        Navigation.NavigateTo("/dashboard");
     }
 }

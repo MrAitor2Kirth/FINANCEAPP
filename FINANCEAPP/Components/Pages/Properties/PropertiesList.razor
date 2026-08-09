@@ -1,0 +1,252 @@
+@page "/inmuebles"
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject IPropertyService PropertyService
+@inject NavigationManager Navigation
+@inject ILogger<PropertiesList> Logger
+
+<PageTitle>Propiedades e Inmuebles</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1>Gestión de Propiedades e Inmuebles</h1>
+            <p class="text-muted">Administra tus inversiones inmobiliarias y realiza seguimiento de ingresos y gastos</p>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="alert alert-info">
+            <span class="spinner-border spinner-border-sm me-2"></span> Cargando propiedades...
+        </div>
+    }
+    else if (properties == null || properties.Count == 0)
+    {
+        <div class="alert alert-warning">
+            <span class="oi oi-warning"></span> No hay propiedades registradas
+            <button class="btn btn-primary ms-3" @onclick="NavigateToNew">
+                Registrar primera propiedad
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="row mb-3">
+            <div class="col-12">
+                <button class="btn btn-primary" @onclick="NavigateToNew">
+                    <span class="oi oi-plus"></span> Nueva Propiedad
+                </button>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">Inversión Total</h6>
+                        <h4>@totalInvested.ToString("C")</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">Ingresos</h6>
+                        <h4 class="text-success">@totalIncome.ToString("C")</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">Gastos</h6>
+                        <h4 class="text-danger">@totalExpenses.ToString("C")</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">Resultado Neto</h6>
+                        <h4 class="@(netResult >= 0 ? "text-success" : "text-danger")">
+                            @netResult.ToString("C")
+                        </h4>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Dirección</th>
+                        <th>Tipo</th>
+                        <th>Status</th>
+                        <th>Precio Compra</th>
+                        <th>Ingresos</th>
+                        <th>Gastos</th>
+                        <th>Resultado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var property in properties.OrderByDescending(p => p.CurrentValue))
+                    {
+                        <tr>
+                            <td>
+                                <strong>@property.Name</strong>
+                                <br />
+                                <small class="text-muted">@property.Address</small>
+                            </td>
+                            <td>@property.PropertyType</td>
+                            <td>
+                                <span class="badge @GetStatusBadgeClass(property.Status)">
+                                    @property.Status
+                                </span>
+                            </td>
+                            <td class="text-end">@property.PurchasePrice.ToString("C")</td>
+                            <td class="text-end text-success">@property.TotalIncome.ToString("C")</td>
+                            <td class="text-end text-danger">@property.TotalInvested.ToString("C")</td>
+                            <td class="text-end fw-bold @(property.NetResult >= 0 ? "text-success" : "text-danger")">
+                                @property.NetResult.ToString("C")
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => NavigateToDetail(property.Id)">
+                                    <span class="oi oi-eye"></span>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => NavigateToEdit(property.Id)">
+                                    <span class="oi oi-pencil"></span>
+                                </button>
+                                @if (property.Status != "Vendida")
+                                {
+                                    <button class="btn btn-sm btn-outline-success" @onclick="() => SellProperty(property.Id)">
+                                        Vender
+                                    </button>
+                                }
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteProperty(property.Id)">
+                                    <span class="oi oi-trash"></span>
+                                </button>
+                            </td>
+                        </tr>
+
+                        @if (expandedPropertyId == property.Id)
+                        {
+                            <tr class="table-secondary">
+                                <td colspan="8">
+                                    <div class="p-3">
+                                        <h6 class="mb-3">Detalle de Operaciones</h6>
+                                        <PropertyOperationsList PropertyName="@property.Name" PropertyService="@PropertyService" OnOperationAdded="@RefreshProperties" />
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<Property> properties = new();
+    private bool isLoading = true;
+    private int? expandedPropertyId = null;
+    private decimal totalInvested = 0;
+    private decimal totalIncome = 0;
+    private decimal totalExpenses = 0;
+    private decimal netResult = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await RefreshProperties();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al cargar propiedades");
+        }
+    }
+
+    private async Task RefreshProperties()
+    {
+        isLoading = true;
+        try
+        {
+            properties = await PropertyService.GetAllPropertiesAsync();
+            totalInvested = properties.Sum(p => p.TotalInvested);
+            totalIncome = properties.Sum(p => p.TotalIncome);
+            totalExpenses = totalInvested;
+            netResult = totalIncome - totalExpenses;
+            isLoading = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al refrescar propiedades");
+            isLoading = false;
+        }
+    }
+
+    private void NavigateToDetail(int propertyId)
+    {
+        if (expandedPropertyId == propertyId)
+        {
+            expandedPropertyId = null;
+        }
+        else
+        {
+            expandedPropertyId = propertyId;
+        }
+    }
+
+    private void NavigateToEdit(int propertyId)
+    {
+        Navigation.NavigateTo($"/inmuebles/editar/{propertyId}");
+    }
+
+    private async Task SellProperty(int propertyId)
+    {
+        Navigation.NavigateTo($"/inmuebles/vender/{propertyId}");
+    }
+
+    private async Task DeleteProperty(int propertyId)
+    {
+        if (await JSRuntime.InvokeAsync<bool>("confirm", "¿Estás seguro de que deseas eliminar esta propiedad?"))
+        {
+            try
+            {
+                await PropertyService.DeletePropertyAsync(propertyId);
+                await RefreshProperties();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error al eliminar propiedad");
+            }
+        }
+    }
+
+    private void NavigateToNew()
+    {
+        Navigation.NavigateTo("/inmuebles/nueva");
+    }
+
+    private string GetStatusBadgeClass(string status)
+    {
+        return status switch
+        {
+            "Alquilado" => "bg-success",
+            "Vacío" => "bg-warning",
+            "Uso Propio" => "bg-info",
+            "En Venta" => "bg-secondary",
+            "Vendida" => "bg-danger",
+            _ => "bg-dark"
+        };
+    }
+
+    [Inject]
+    private IJSRuntime JSRuntime { get; set; }
+}

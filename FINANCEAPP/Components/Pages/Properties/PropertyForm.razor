@@ -1,0 +1,232 @@
+@page "/inmuebles/nueva"
+@page "/inmuebles/editar/{id:int}"
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject IPropertyService PropertyService
+@inject NavigationManager Navigation
+@inject ILogger<PropertyForm> Logger
+
+<PageTitle>@(Id == 0 ? "Nueva Propiedad" : "Editar Propiedad")</PageTitle>
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">@(Id == 0 ? "Registrar Nueva Propiedad" : "Editar Propiedad")</h5>
+                </div>
+
+                <div class="card-body">
+                    @if (property == null)
+                    {
+                        <div class="alert alert-info">Cargando...</div>
+                    }
+                    else
+                    {
+                        <EditForm Model="@property" OnValidSubmit="@HandleSubmit" OnInvalidSubmit="@HandleInvalidSubmit">
+                            <DataAnnotationsValidator />
+
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Nombre/Descripción *</label>
+                                    <InputText class="form-control" placeholder="Ej: Piso Centro Madrid"
+                                              @bind-Value="property.Name" />
+                                    <ValidationMessage For="@(() => property.Name)" class="text-danger" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Dirección *</label>
+                                    <InputText class="form-control" placeholder="Calle Principal 123, Madrid"
+                                              @bind-Value="property.Address" />
+                                    <ValidationMessage For="@(() => property.Address)" class="text-danger" />
+                                </div>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Tipo de Propiedad *</label>
+                                    <InputSelect class="form-select" @bind-Value="property.PropertyType">
+                                        <option value="">Seleccionar tipo...</option>
+                                        <option value="Apartamento">Apartamento</option>
+                                        <option value="Casa">Casa</option>
+                                        <option value="Duplex">Dúplex</option>
+                                        <option value="Local Comercial">Local Comercial</option>
+                                        <option value="Oficina">Oficina</option>
+                                        <option value="Garaje">Garaje</option>
+                                        <option value="Terreno">Terreno</option>
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => property.PropertyType)" class="text-danger" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Status Actual *</label>
+                                    <InputSelect class="form-select" @bind-Value="property.Status">
+                                        <option value="">Seleccionar status...</option>
+                                        <option value="Alquilado">Alquilado</option>
+                                        <option value="Vacío">Vacío</option>
+                                        <option value="Uso Propio">Uso Propio</option>
+                                        <option value="En Venta">En Venta</option>
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => property.Status)" class="text-danger" />
+                                </div>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Precio de Compra (€) *</label>
+                                    <InputNumber class="form-control" placeholder="Ej: 250000.00"
+                                               @bind-Value="property.PurchasePrice" step="0.01" />
+                                    <ValidationMessage For="@(() => property.PurchasePrice)" class="text-danger" />
+                                    <small class="text-muted">⚠️ Esto es solo para registro. Las operaciones se crean aparte.</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Fecha de Compra *</label>
+                                    <InputDate class="form-control" @bind-Value="property.PurchaseDate" />
+                                    <ValidationMessage For="@(() => property.PurchaseDate)" class="text-danger" />
+                                </div>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Alquiler Mensual (€)</label>
+                                    <InputNumber class="form-control" placeholder="Ej: 1200.00"
+                                               @bind-Value="property.MonthlyRent" step="0.01" />
+                                    <small class="text-muted">Si está alquilada</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Valor Actual Estimado (€) *</label>
+                                    <InputNumber class="form-control" placeholder="Ej: 280000.00"
+                                               @bind-Value="property.CurrentValue" step="0.01" />
+                                    <ValidationMessage For="@(() => property.CurrentValue)" class="text-danger" />
+                                </div>
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(errorMessage))
+                            {
+                                <div class="alert alert-danger" role="alert">
+                                    @errorMessage
+                                </div>
+                            }
+
+                            <div class="d-flex gap-2">
+                                <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
+                                    @if (isSubmitting)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-2"></span>
+                                    }
+                                    @(Id == 0 ? "Registrar Propiedad" : "Guardar Cambios")
+                                </button>
+                                <button type="button" class="btn btn-secondary" @onclick="NavigateBack">
+                                    Cancelar
+                                </button>
+                            </div>
+                        </EditForm>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">⚠️ Importante</h6>
+                </div>
+                <div class="card-body small">
+                    <p>
+                        <strong>Precio de Compra:</strong> Se registra una única vez al crear la propiedad.
+                    </p>
+                    <p>
+                        <strong>Operaciones:</strong> Reforma, IBI, Alquiler, etc. se registran en la sección de operaciones.
+                    </p>
+                    <p>
+                        <strong>Venta:</strong> Usa el botón "Vender" desde la lista para completar el proceso.
+                    </p>
+                    <p class="text-muted">
+                        💡 El sistema actualizará automáticamente totales e ingresos.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private Property property = new();
+    private bool isSubmitting = false;
+    private string errorMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (Id > 0)
+            {
+                var existingProperty = await PropertyService.GetPropertyByIdAsync(Id);
+                if (existingProperty != null)
+                {
+                    property = existingProperty;
+                }
+                else
+                {
+                    errorMessage = "Propiedad no encontrada";
+                }
+            }
+            else
+            {
+                property = new Property
+                {
+                    PurchaseDate = DateTime.Now,
+                    CreatedAt = DateTime.Now,
+                    UpdatedAt = DateTime.Now
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error cargando propiedad");
+            errorMessage = "Error al cargar la propiedad";
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSubmitting = true;
+        errorMessage = string.Empty;
+
+        try
+        {
+            property.UpdatedAt = DateTime.Now;
+
+            if (Id == 0)
+            {
+                property.CreatedAt = DateTime.Now;
+                await PropertyService.CreatePropertyAsync(property);
+            }
+            else
+            {
+                property.Id = Id;
+                await PropertyService.UpdatePropertyAsync(property);
+            }
+
+            Navigation.NavigateTo("/inmuebles");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error guardando propiedad");
+            errorMessage = $"Error al guardar la propiedad: {ex.Message}";
+            isSubmitting = false;
+        }
+    }
+
+    private void HandleInvalidSubmit()
+    {
+        errorMessage = "Por favor completa todos los campos requeridos correctamente";
+    }
+
+    private void NavigateBack()
+    {
+        Navigation.NavigateTo("/inmuebles");
+    }
+}

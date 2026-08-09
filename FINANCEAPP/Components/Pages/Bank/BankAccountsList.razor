@@ -1,0 +1,212 @@
+@page "/banco"
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject IBankService BankService
+@inject NavigationManager Navigation
+@inject ILogger<BankAccountsList> Logger
+
+<PageTitle>Cuentas Bancarias</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1>Gestión de Cuentas Bancarias</h1>
+            <p class="text-muted">Administra tus cuentas bancarias y realiza seguimiento de movimientos</p>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="alert alert-info">
+            <span class="spinner-border spinner-border-sm me-2"></span> Cargando cuentas...
+        </div>
+    }
+    else if (bankAccounts == null || bankAccounts.Count == 0)
+    {
+        <div class="alert alert-warning">
+            <span class="oi oi-warning"></span> No hay cuentas bancarias registradas
+            <button class="btn btn-primary ms-3" @onclick="NavigateToNewAccount">
+                Crear primera cuenta
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="row mb-3">
+            <div class="col-12">
+                <button class="btn btn-primary" @onclick="NavigateToNewAccount">
+                    <span class="oi oi-plus"></span> Nueva Cuenta
+                </button>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="card-title">Saldo Total</h6>
+                        <h3 class="text-success">@totalBalance.ToString("C")</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="card-title">Cuentas Activas</h6>
+                        <h3>@bankAccounts.Count</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="card-title">Promedio por Cuenta</h6>
+                        <h3>@(bankAccounts.Count > 0 ? (totalBalance / bankAccounts.Count).ToString("C") : "N/A")</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Nombre Cuenta</th>
+                        <th>Banco</th>
+                        <th>IBAN</th>
+                        <th>Tipo</th>
+                        <th>Saldo Actual</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var account in bankAccounts)
+                    {
+                        <tr>
+                            <td>
+                                <strong>@account.Name</strong>
+                            </td>
+                            <td>@account.BankName</td>
+                            <td>
+                                <code>@(MaskIban(account.IBAN))</code>
+                            </td>
+                            <td>@account.AccountType</td>
+                            <td class="text-end">
+                                <strong class="@(account.CurrentBalance >= 0 ? "text-success" : "text-danger")">
+                                    @account.FormattedBalance
+                                </strong>
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => NavigateToDetail(account.Id)">
+                                    <span class="oi oi-eye"></span>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => NavigateToEdit(account.Id)">
+                                    <span class="oi oi-pencil"></span>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAccount(account.Id)">
+                                    <span class="oi oi-trash"></span>
+                                </button>
+                            </td>
+                        </tr>
+
+                        @if (expandedAccountId == account.Id)
+                        {
+                            <tr class="table-secondary">
+                                <td colspan="6">
+                                    <div class="p-3">
+                                        <h6 class="mb-3">Últimas Operaciones</h6>
+                                        <BankOperationsList AccountName="@account.Name" BankService="@BankService" OnOperationAdded="@RefreshAccounts" />
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<BankAccount> bankAccounts = new();
+    private bool isLoading = true;
+    private int? expandedAccountId = null;
+    private decimal totalBalance = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await RefreshAccounts();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al cargar cuentas");
+        }
+    }
+
+    private async Task RefreshAccounts()
+    {
+        isLoading = true;
+        try
+        {
+            bankAccounts = await BankService.GetAllBankAccountsAsync();
+            totalBalance = bankAccounts.Sum(a => a.CurrentBalance);
+            isLoading = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al refrescar cuentas");
+            isLoading = false;
+        }
+    }
+
+    private void NavigateToDetail(int accountId)
+    {
+        if (expandedAccountId == accountId)
+        {
+            expandedAccountId = null;
+        }
+        else
+        {
+            expandedAccountId = accountId;
+        }
+    }
+
+    private void NavigateToEdit(int accountId)
+    {
+        Navigation.NavigateTo($"/banco/editar/{accountId}");
+    }
+
+    private void NavigateToNewAccount()
+    {
+        Navigation.NavigateTo("/banco/nueva");
+    }
+
+    private async Task DeleteAccount(int accountId)
+    {
+        if (await JSRuntime.InvokeAsync<bool>("confirm", "¿Estás seguro? Se eliminarán todas sus operaciones."))
+        {
+            try
+            {
+                await BankService.DeleteBankAccountAsync(accountId);
+                await RefreshAccounts();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error al eliminar cuenta");
+            }
+        }
+    }
+
+    private string MaskIban(string iban)
+    {
+        if (string.IsNullOrEmpty(iban) || iban.Length < 8)
+            return iban;
+        return $"****{iban.Substring(iban.Length - 4)}";
+    }
+
+    [Inject]
+    private IJSRuntime JSRuntime { get; set; }
+}

@@ -1,0 +1,146 @@
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject ILogger<ValueHistoryList> Logger
+
+@if (histories == null)
+{
+    <div class="alert alert-info">Cargando historial de valores...</div>
+}
+else if (histories.Count == 0)
+{
+    <div class="alert alert-warning">No hay histórico de valores registrado</div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Valor</th>
+                    <th>Rentabilidad (%)</th>
+                    <th>Notas</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var history in histories)
+                {
+                    <tr>
+                        <td>@history.Date.ToString("dd/MM/yyyy")</td>
+                        <td class="text-end">@history.Value.ToString("C")</td>
+                        <td class="text-end">
+                            @if (history.ReturnAtDate >= 0)
+                            {
+                                <span class="badge bg-success">@history.ReturnAtDate.ToString("F2")%</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-danger">@history.ReturnAtDate.ToString("F2")%</span>
+                            }
+                        </td>
+                        <td>@history.Notes</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteHistory(history.Id)">
+                                Eliminar
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<div class="mt-3">
+    <h6>Registrar Nuevo Valor</h6>
+    <div class="row g-2">
+        <div class="col-md-3">
+            <input type="date" class="form-control form-control-sm" @bind="newHistory.Date" />
+        </div>
+        <div class="col-md-3">
+            <input type="number" class="form-control form-control-sm" placeholder="Valor del fondo" 
+                   @bind="newHistory.Value" step="0.01" />
+        </div>
+        <div class="col-md-3">
+            <input type="number" class="form-control form-control-sm" placeholder="Rentabilidad %" 
+                   @bind="newHistory.ReturnAtDate" step="0.01" />
+        </div>
+        <div class="col-md-3">
+            <button class="btn btn-sm btn-primary w-100" @onclick="AddHistory">Registrar</button>
+        </div>
+    </div>
+    <div class="row g-2 mt-2">
+        <div class="col-12">
+            <textarea class="form-control form-control-sm" rows="2" placeholder="Notas (opcional)" 
+                      @bind="newHistory.Notes"></textarea>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string FundName { get; set; }
+
+    [Parameter]
+    public IFundService FundService { get; set; }
+
+    [Parameter]
+    public EventCallback OnHistoryAdded { get; set; }
+
+    private List<FundValueHistory> histories = new();
+    private FundValueHistory newHistory = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadHistory();
+    }
+
+    private async Task LoadHistory()
+    {
+        try
+        {
+            histories = await FundService.GetFundValueHistoryAsync(FundName);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error cargando historial");
+        }
+    }
+
+    private async Task AddHistory()
+    {
+        if (newHistory.Value <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            newHistory.FundName = FundName;
+            await FundService.UpdateFundValueWithHistoryAsync(FundName, newHistory.Value);
+            newHistory = new();
+            await LoadHistory();
+            await OnHistoryAdded.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error añadiendo historial");
+        }
+    }
+
+    private async Task DeleteHistory(int historyId)
+    {
+        try
+        {
+            // Nota: Se necesitaría un método DeleteFundValueHistoryAsync en el servicio
+            await LoadHistory();
+            await OnHistoryAdded.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error eliminando historial");
+        }
+    }
+}

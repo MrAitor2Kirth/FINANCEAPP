@@ -1,0 +1,404 @@
+@page "/companies"
+@inject ICompanyService CompanyService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Empresas</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="display-5 fw-bold text-primary">
+                        <i class="bi bi-building me-2"></i>
+                        Catálogo de Empresas
+                    </h1>
+                    <p class="lead text-muted">Información detallada de empresas y oportunidades de inversión</p>
+                </div>
+                <div>
+                    <button class="btn btn-primary btn-lg" @onclick="CreateNewCompany">
+                        <i class="bi bi-plus-circle me-2"></i>
+                        Nueva Empresa
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <!-- Indicador de carga -->
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <p class="mt-3 text-muted">Cargando empresas...</p>
+        </div>
+    }
+    else if (companies == null || !companies.Any())
+    {
+        <!-- Mensaje cuando no hay datos -->
+        <div class="alert alert-info d-flex align-items-center" role="alert">
+            <i class="bi bi-info-circle-fill me-2"></i>
+            <div>
+                No hay empresas registradas en el sistema.
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- Tarjetas de resumen -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card border-primary shadow-sm">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Total Empresas</h6>
+                        <h3 class="card-title text-primary mb-0">@companies.Count</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-success shadow-sm">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Sectores Únicos</h6>
+                        <h3 class="card-title text-success mb-0">@uniqueSectorsCount</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-info shadow-sm">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Dividend Yield Promedio</h6>
+                        <h3 class="card-title text-info mb-0">@averageDividendYield.ToString("N2")%</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-warning shadow-sm">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Precio Promedio</h6>
+                        <h3 class="card-title text-warning mb-0">@averagePrice.ToString("C2")</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabla de empresas -->
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-table me-2"></i>Listado de Empresas</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th scope="col" class="text-center">#</th>
+                                <th scope="col">Nombre</th>
+                                <th scope="col" class="text-center">Ticker</th>
+                                <th scope="col">Sector</th>
+                                <th scope="col" class="text-end">Precio Actual</th>
+                                <th scope="col" class="text-center">Dividend Yield</th>
+                                <th scope="col" class="text-center">Información</th>
+                                <th scope="col" class="text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var company in companies)
+                            {
+                                <tr>
+                                    <td class="text-center align-middle">
+                                        <span class="badge bg-secondary">@company.Id</span>
+                                    </td>
+                                    <td class="align-middle">
+                                        <strong>@company.Name</strong>
+                                    </td>
+                                    <td class="text-center align-middle">
+                                        <span class="badge bg-primary fs-6">@company.Ticker</span>
+                                    </td>
+                                    <td class="align-middle">
+                                        <span class="badge @GetSectorBadgeClass(company.Sector)">
+                                            @company.Sector
+                                        </span>
+                                    </td>
+                                    <td class="text-end align-middle">
+                                        <strong class="text-success">@company.CurrentPrice.ToString("C2")</strong>
+                                    </td>
+                                    <td class="text-center align-middle">
+                                        @if (company.DividendYield > 0)
+                                        {
+                                            <span class="badge @GetDividendYieldBadgeClass(company.DividendYield)">
+                                                @company.FormattedDividendYield
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">-</span>
+                                        }
+                                    </td>
+                                    <td class="text-center align-middle">
+                                        <a href="@company.InvestingUrl" 
+                                           target="_blank" 
+                                           rel="noopener noreferrer"
+                                           class="btn btn-sm btn-outline-primary"
+                                           title="Ver información en Investing.com">
+                                            <i class="bi bi-box-arrow-up-right me-1"></i>
+                                            Ver en Investing
+                                        </a>
+                                    </td>
+                                    <td class="text-center align-middle">
+                                        <div class="btn-group" role="group">
+                                            <button type="button" 
+                                                    class="btn btn-sm btn-outline-warning" 
+                                                    @onclick="() => EditCompany(company.Id)"
+                                                    title="Editar empresa">
+                                                <i class="bi bi-pencil-fill"></i>
+                                            </button>
+                                            <button type="button" 
+                                                    class="btn btn-sm btn-outline-danger" 
+                                                    @onclick="() => ConfirmDelete(company)"
+                                                    title="Eliminar empresa">
+                                                <i class="bi bi-trash-fill"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer text-muted">
+                <small>
+                    <i class="bi bi-info-circle me-1"></i>
+                    Mostrando @companies.Count empresa(s) registrada(s) en el sistema
+                </small>
+            </div>
+        </div>
+
+        <!-- Sección de Enlaces Externos -->
+        <div class="alert alert-light border mt-4" role="alert">
+            <h5 class="alert-heading">
+                <i class="bi bi-link-45deg me-2"></i>
+                Acerca de los Enlaces
+            </h5>
+            <p class="mb-0">
+                Los enlaces "Ver en Investing" se abren en una nueva pestaña y dirigen al sitio 
+                <strong>Investing.com</strong> para consultar información actualizada sobre cada empresa.
+                Los datos se buscan automáticamente usando el ticker de cotización.
+            </p>
+        </div>
+    }
+</div>
+
+<!-- Modal de confirmación de eliminación -->
+<div class="modal fade @(showDeleteModal ? "show d-block" : "")" 
+     tabindex="-1" 
+     style="@(showDeleteModal ? "background-color: rgba(0,0,0,0.5);" : "")">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    Confirmar Eliminación
+                </h5>
+                <button type="button" class="btn-close btn-close-white" @onclick="CancelDelete"></button>
+            </div>
+            <div class="modal-body">
+                @if (companyToDelete != null)
+                {
+                    <p class="mb-2">¿Está seguro que desea eliminar la siguiente empresa?</p>
+                    <div class="alert alert-warning">
+                        <strong>Nombre:</strong> @companyToDelete.Name<br/>
+                        <strong>Ticker:</strong> @companyToDelete.Ticker<br/>
+                        <strong>Sector:</strong> @companyToDelete.Sector
+                    </div>
+                    <p class="text-danger mb-0">
+                        <i class="bi bi-exclamation-circle me-1"></i>
+                        <strong>Esta acción no se puede deshacer.</strong>
+                    </p>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" 
+                        class="btn btn-secondary" 
+                        @onclick="CancelDelete"
+                        disabled="@isDeleting">
+                    Cancelar
+                </button>
+                <button type="button" 
+                        class="btn btn-danger" 
+                        @onclick="DeleteCompany"
+                        disabled="@isDeleting">
+                    @if (isDeleting)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                        <span>Eliminando...</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-trash-fill me-2"></i>
+                        <span>Eliminar</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Lista de empresas obtenidas del servicio
+    private List<CompanyDetail>? companies;
+
+    // Indicador de estado de carga
+    private bool isLoading = true;
+
+    // Estado del modal de eliminación
+    private bool showDeleteModal = false;
+    private bool isDeleting = false;
+    private CompanyDetail? companyToDelete = null;
+
+    // Métricas calculadas
+    private int uniqueSectorsCount => companies?.Select(c => c.Sector).Distinct().Count() ?? 0;
+    private decimal averageDividendYield => companies?.Any() == true ? companies.Average(c => c.DividendYield) : 0;
+    private decimal averagePrice => companies?.Any() == true ? companies.Average(c => c.CurrentPrice) : 0;
+
+    /// <summary>
+    /// Método que se ejecuta cuando el componente se inicializa
+    /// Carga los datos de las empresas desde el servicio
+    /// </summary>
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCompanies();
+    }
+
+    /// <summary>
+    /// Carga las empresas desde el servicio
+    /// </summary>
+    private async Task LoadCompanies()
+    {
+        try
+        {
+            isLoading = true;
+            // Obtener todas las empresas desde el servicio
+            companies = await CompanyService.GetAllAsync();
+        }
+        catch (Exception ex)
+        {
+            // En producción, aquí se debería implementar un sistema de logging
+            Console.WriteLine($"Error al cargar empresas: {ex.Message}");
+            companies = new List<CompanyDetail>();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Navega al formulario de creación de nueva empresa
+    /// </summary>
+    private void CreateNewCompany()
+    {
+        Navigation.NavigateTo("/companies/new");
+    }
+
+    /// <summary>
+    /// Navega al formulario de edición de empresa
+    /// </summary>
+    private void EditCompany(int id)
+    {
+        Navigation.NavigateTo($"/companies/edit/{id}");
+    }
+
+    /// <summary>
+    /// Muestra el modal de confirmación de eliminación
+    /// </summary>
+    private void ConfirmDelete(CompanyDetail company)
+    {
+        companyToDelete = company;
+        showDeleteModal = true;
+    }
+
+    /// <summary>
+    /// Cancela la eliminación y cierra el modal
+    /// </summary>
+    private void CancelDelete()
+    {
+        companyToDelete = null;
+        showDeleteModal = false;
+    }
+
+    /// <summary>
+    /// Elimina la empresa seleccionada
+    /// </summary>
+    private async Task DeleteCompany()
+    {
+        if (companyToDelete == null) return;
+
+        try
+        {
+            isDeleting = true;
+            var success = await CompanyService.DeleteAsync(companyToDelete.Id);
+
+            if (success)
+            {
+                // Recargar la lista de empresas
+                await LoadCompanies();
+
+                // Cerrar el modal
+                showDeleteModal = false;
+                companyToDelete = null;
+            }
+            else
+            {
+                // TODO: Mostrar mensaje de error al usuario
+                Console.WriteLine("No se pudo eliminar la empresa");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al eliminar empresa: {ex.Message}");
+        }
+        finally
+        {
+            isDeleting = false;
+        }
+    }
+
+    /// <summary>
+    /// Determina la clase CSS del badge según el sector
+    /// </summary>
+    /// <param name="sector">Nombre del sector</param>
+    /// <returns>Clase CSS de Bootstrap para el badge</returns>
+    private string GetSectorBadgeClass(string sector)
+    {
+        return sector?.ToLower() switch
+        {
+            var s when s.Contains("tecnología") || s.Contains("technology") => "bg-info text-dark",
+            var s when s.Contains("energía") || s.Contains("energy") => "bg-warning text-dark",
+            var s when s.Contains("salud") || s.Contains("health") => "bg-success",
+            var s when s.Contains("financiero") || s.Contains("financial") => "bg-primary",
+            var s when s.Contains("consumo") || s.Contains("consumer") => "bg-danger",
+            var s when s.Contains("industrial") || s.Contains("industry") => "bg-secondary",
+            _ => "bg-dark"
+        };
+    }
+
+    /// <summary>
+    /// Determina la clase CSS del badge según el valor del dividend yield
+    /// </summary>
+    /// <param name="dividendYield">Valor del dividend yield</param>
+    /// <returns>Clase CSS de Bootstrap para el badge</returns>
+    private string GetDividendYieldBadgeClass(decimal dividendYield)
+    {
+        // Verde para yields altos (>5%), amarillo para medios (2-5%), info para bajos
+        if (dividendYield >= 5.0m)
+            return "bg-success";
+        else if (dividendYield >= 2.0m)
+            return "bg-warning text-dark";
+        else
+            return "bg-info text-dark";
+    }
+}
