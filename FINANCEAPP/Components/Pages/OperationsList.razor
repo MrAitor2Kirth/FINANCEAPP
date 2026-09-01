@@ -1,5 +1,8 @@
 @page "/operations"
+@using System.Globalization
+@using FINANCEAPP.Models
 @inject IOperationService OperationService
+@inject ICompanyService CompanyService
 
 <PageTitle>Operaciones Financieras</PageTitle>
 
@@ -96,7 +99,10 @@
                                 <th scope="col" style="width: 150px;">Tipo</th>
                                 <th scope="col" style="width: 150px;" class="text-center">Fecha Apertura</th>
                                 <th scope="col" style="width: 150px;" class="text-center">Fecha Cierre</th>
-                                <th scope="col" style="width: 130px;" class="text-end">Importe</th>
+                                <th scope="col" style="width: 130px;" class="text-end">Precio/Acción</th>
+                                <th scope="col" style="width: 110px;" class="text-end">Nº Acciones</th>
+                                <th scope="col" style="width: 110px;" class="text-end">Comisiones</th>
+                                <th scope="col" style="width: 130px;" class="text-end">Importe Total</th>
                                 <th scope="col" style="width: 100px;" class="text-center">Estado</th>
                                 <th scope="col" style="width: 140px;" class="text-center">Acciones</th>
                             </tr>
@@ -112,10 +118,13 @@
                                             <span class="badge bg-warning text-dark">@operation.Id</span>
                                         </td>
                                         <td>
-                                            <input type="text" 
-                                                   class="form-control form-control-sm" 
-                                                   @bind="editOperation.CompanyName" 
-                                                   placeholder="Nombre empresa" />
+                                            <select class="form-select form-select-sm" @bind="editOperation.CompanyName">
+                                                <option value="">-- Seleccionar empresa --</option>
+                                                @foreach (var company in companies)
+                                                {
+                                                    <option value="@company.Name">@company.Name</option>
+                                                }
+                                            </select>
                                         </td>
                                         <td>
                                             <select class="form-select form-select-sm" @bind="editOperation.Type">
@@ -134,10 +143,44 @@
                                                        @bind-Value="editOperationCloseDate" />
                                         </td>
                                         <td>
-                                            <input type="number" 
-                                                   class="form-control form-control-sm text-end" 
-                                                   @bind="editOperation.Amount" 
+                                            <input type="number"
+                                                   class="form-control form-control-sm text-end"
+                                                   @bind="editPricePerShare"
+                                                   @bind:event="oninput"
+                                                   @onchange="OnPricePerShareChanged"
                                                    step="0.01"
+                                                   min="0"
+                                                   inputmode="decimal"
+                                                   placeholder="0.00" />
+                                        </td>
+                                        <td>
+                                            <input type="number"
+                                                   class="form-control form-control-sm text-end"
+                                                   @bind="editNumberOfShares"
+                                                   @bind:after="RecalculateAmountSimple"
+                                                   step="1"
+                                                   placeholder="0" />
+                                        </td>
+                                        <td>
+                                            <input type="number"
+                                                   class="form-control form-control-sm text-end"
+                                                   @bind="editCommission"
+                                                   @bind:after="RecalculateAmountSimple"
+                                                   step="0.01"
+                                                   min="0"
+                                                   inputmode="decimal"
+                                                   placeholder="0.00" />
+                                        </td>
+                                        <td>
+                                            <input type="number"
+                                                   class="form-control form-control-sm text-end fw-bold text-primary"
+                                                   @bind="editCalculatedAmount"
+                                                   @bind:event="oninput"
+                                                   @bind:after="OnAmountChanged"
+                                                   step="0.01"
+                                                   min="0"
+                                                   inputmode="decimal"
+                                                   title="Puede introducir el importe manualmente"
                                                    placeholder="0.00" />
                                         </td>
                                         <td class="text-center align-middle">
@@ -198,6 +241,9 @@
                                                 <span class="text-muted">-</span>
                                             }
                                         </td>
+                                        <td class="text-end align-middle">@operation.PricePerShare.ToString("N4")</td>
+                                        <td class="text-end align-middle">@operation.NumberOfShares.ToString("N4")</td>
+                                        <td class="text-end align-middle">@operation.Commission.ToString("C2")</td>
                                         <td class="text-end align-middle">
                                             <strong class="text-primary">@operation.Amount.ToString("C2")</strong>
                                         </td>
@@ -318,6 +364,9 @@
     // Lista de operaciones
     private List<Operation>? operations;
 
+    // Empresas disponibles
+    private List<CompanyDetail> companies = new();
+
     // Estados del componente
     private bool isLoading = true;
     private bool isSaving = false;
@@ -329,6 +378,13 @@
     private Operation editOperation = new();
     private DateTime editOperationDate = DateTime.Now;
     private DateTime? editOperationCloseDate = null;
+
+    // Campos desglosados del importe
+    private decimal editPricePerShare = 0;
+    private int editNumberOfShares = 0;
+    private decimal editCommission = 0;
+    private decimal editCalculatedAmount = 0;
+    private bool amountManuallyEdited = false;
 
     // Eliminación
     private Operation? operationToDelete = null;
@@ -349,6 +405,7 @@
         {
             isLoading = true;
             operations = await OperationService.GetAllAsync();
+            companies = await CompanyService.GetAllAsync();
         }
         catch (Exception ex)
         {
@@ -399,6 +456,13 @@
 
         editOperationDate = operation.Date;
         editOperationCloseDate = operation.CloseDate;
+        editPricePerShare = operation.PricePerShare;
+        editNumberOfShares = operation.NumberOfShares;
+        editCommission = operation.Commission;
+        editCalculatedAmount = operation.Amount;
+        // Si la operación no tiene precio/acción o número de acciones (p.ej. Dividendo),
+        // se considera que el importe se informa manualmente.
+        amountManuallyEdited = operation.PricePerShare <= 0 || operation.NumberOfShares <= 0;
     }
 
     /// <summary>
@@ -416,6 +480,11 @@
         editOperation = new();
         editOperationDate = DateTime.Now;
         editOperationCloseDate = null;
+        editPricePerShare = 0;
+        editNumberOfShares = 0;
+        editCommission = 0;
+        editCalculatedAmount = 0;
+        amountManuallyEdited = false;
     }
 
     /// <summary>
@@ -430,15 +499,33 @@
             // Validaciones básicas
             if (string.IsNullOrWhiteSpace(editOperation.CompanyName))
             {
-                Console.WriteLine("El nombre de la empresa es obligatorio");
+                Console.WriteLine("Debe seleccionar una empresa");
                 return;
             }
 
-            if (editOperation.Amount <= 0)
+            if (amountManuallyEdited)
             {
-                Console.WriteLine("El importe debe ser mayor que 0");
+                // El importe se informa directamente (p.ej. operaciones de Dividendo),
+                // no se exige precio/acción ni número de acciones.
+                if (editCalculatedAmount <= 0)
+                {
+                    Console.WriteLine("El importe total debe ser mayor que 0");
+                    return;
+                }
+            }
+            else if (editPricePerShare <= 0 || editNumberOfShares <= 0)
+            {
+                Console.WriteLine("El precio por acción y el número de acciones deben ser mayores que 0");
                 return;
             }
+
+            // Calcular importe final: si el usuario lo ha editado manualmente, se respeta su valor
+            editOperation.PricePerShare = editPricePerShare;
+            editOperation.NumberOfShares = editNumberOfShares;
+            editOperation.Commission = editCommission;
+            editOperation.Amount = amountManuallyEdited
+                ? Math.Round(editCalculatedAmount, 2)
+                : Math.Round(editPricePerShare * editNumberOfShares + editCommission, 2);
 
             // Asignar fechas desde los campos de edición
             editOperation.Date = editOperationDate;
@@ -524,6 +611,47 @@
         finally
         {
             isDeleting = false;
+        }
+    }
+
+    private void RecalculateAmountSimple()
+    {
+        if (!amountManuallyEdited)
+        {
+            editCalculatedAmount = Math.Round(editPricePerShare * editNumberOfShares + editCommission, 2);
+        }
+    }
+
+    /// <summary>
+    /// Se dispara cuando el usuario edita manualmente el importe total.
+    /// A partir de ese momento, el importe deja de recalcularse automáticamente
+    /// hasta que se reinicie la edición de la operación.
+    /// </summary>
+    private void OnAmountChanged()
+    {
+        amountManuallyEdited = true;
+    }
+
+    private async Task OnPricePerShareChanged(ChangeEventArgs e)
+    {
+        var rawValue = e.Value?.ToString();
+        if (decimal.TryParse(rawValue, NumberStyles.Any, CultureInfo.InvariantCulture, out var price) ||
+            decimal.TryParse(rawValue, NumberStyles.Any, CultureInfo.CurrentCulture, out price))
+        {
+            editPricePerShare = Math.Round(price, 2);
+            if (!amountManuallyEdited)
+            {
+                editCalculatedAmount = Math.Round(editPricePerShare * editNumberOfShares + editCommission, 2);
+            }
+
+            // Actualizar precio actual de la empresa seleccionada
+            if (!string.IsNullOrWhiteSpace(editOperation.CompanyName))
+            {
+                await CompanyService.UpdateCurrentPriceAsync(editOperation.CompanyName, editPricePerShare);
+                // Reflejar en la lista local
+                var company = companies.FirstOrDefault(c => c.Name == editOperation.CompanyName);
+                if (company != null) company.CurrentPrice = editPricePerShare;
+            }
         }
     }
 

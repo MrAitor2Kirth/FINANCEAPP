@@ -86,33 +86,19 @@
                                     <div class="card bg-light">
                                         <div class="card-body">
                                             <h6 class="card-title">Información de Inversión</h6>
-                                            <div class="row">
+                                            <div class="row g-3">
                                                 <div class="col-md-4">
-                                                    <dl class="row">
-                                                        <dt class="col-sm-6">Total Invertido:</dt>
-                                                        <dd class="col-sm-6">@fund.TotalInvested.ToString("C")</dd>
-                                                    </dl>
+                                                    <label class="form-label">Total Invertido</label>
+                                                    <InputNumber class="form-control" @bind-Value="fund.TotalInvested" step="0.01" />
                                                 </div>
                                                 <div class="col-md-4">
-                                                    <dl class="row">
-                                                        <dt class="col-sm-6">Valor Actual:</dt>
-                                                        <dd class="col-sm-6">@fund.CurrentValue.ToString("C")</dd>
-                                                    </dl>
+                                                    <label class="form-label">Valor Actual</label>
+                                                    <InputNumber class="form-control" @bind-Value="fund.CurrentValue" step="0.01" />
                                                 </div>
                                                 <div class="col-md-4">
-                                                    <dl class="row">
-                                                        <dt class="col-sm-6">Rentabilidad:</dt>
-                                                        <dd class="col-sm-6">
-                                                            @if (fund.CurrentReturn >= 0)
-                                                            {
-                                                                <span class="badge bg-success">@fund.FormattedCurrentReturn</span>
-                                                            }
-                                                            else
-                                                            {
-                                                                <span class="badge bg-danger">@fund.FormattedCurrentReturn</span>
-                                                            }
-                                                        </dd>
-                                                    </dl>
+                                                    <label class="form-label">% Rentabilidad</label>
+                                                    <input class="form-control" value="@CalculatedCurrentReturn.ToString("F2")" readonly />
+                                                    <small class="text-muted">Calculado automáticamente</small>
                                                 </div>
                                             </div>
                                         </div>
@@ -173,6 +159,10 @@
     private Fund fund = new();
     private bool isSubmitting = false;
     private string errorMessage = string.Empty;
+
+    private decimal CalculatedCurrentReturn => fund.TotalInvested > 0
+        ? ((fund.CurrentValue - fund.TotalInvested) / fund.TotalInvested) * 100
+        : 0;
 
     protected override async Task OnInitializedAsync()
     {

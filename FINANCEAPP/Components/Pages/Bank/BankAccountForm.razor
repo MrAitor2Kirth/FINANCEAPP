@@ -1,0 +1,146 @@
+@page "/banco/nueva"
+@page "/banco/editar/{Id:int}"
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject IBankService BankService
+@inject NavigationManager Navigation
+@inject ILogger<BankAccountForm> Logger
+
+<PageTitle>@(Id.HasValue ? "Editar Cuenta" : "Nueva Cuenta")</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1>@(Id.HasValue ? "Editar Cuenta Bancaria" : "Nueva Cuenta Bancaria")</h1>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="alert alert-info">
+            <span class="spinner-border spinner-border-sm me-2"></span> Cargando...
+        </div>
+    }
+    else
+    {
+        <EditForm Model="account" OnValidSubmit="HandleValidSubmit">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="alert alert-danger" />
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Nombre de la cuenta</label>
+                    <InputText class="form-control" @bind-Value="account.Name" />
+                    <ValidationMessage For="@(() => account.Name)" />
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Banco</label>
+                    <InputText class="form-control" @bind-Value="account.BankName" />
+                    <ValidationMessage For="@(() => account.BankName)" />
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">IBAN</label>
+                    <InputText class="form-control" @bind-Value="account.IBAN" />
+                    <ValidationMessage For="@(() => account.IBAN)" />
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Tipo de cuenta</label>
+                    <InputSelect class="form-select" @bind-Value="account.AccountType">
+                        <option value="">-- Seleccionar --</option>
+                        <option value="Corriente">Corriente</option>
+                        <option value="Ahorro">Ahorro</option>
+                        <option value="Depósito">Depósito</option>
+                        <option value="Cuenta Remunerada">Cuenta Remunerada</option>
+                    </InputSelect>
+                    <ValidationMessage For="@(() => account.AccountType)" />
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Saldo actual</label>
+                    <InputNumber class="form-control" step="0.01" @bind-Value="account.CurrentBalance" />
+                    <ValidationMessage For="@(() => account.CurrentBalance)" />
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary" disabled="@isSaving">
+                        @(isSaving ? "Guardando..." : "Guardar")
+                    </button>
+                    <button type="button" class="btn btn-secondary ms-2" @onclick="Cancel">
+                        Cancelar
+                    </button>
+                </div>
+            </div>
+        </EditForm>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int? Id { get; set; }
+
+    private BankAccount account = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (Id.HasValue)
+            {
+                var existing = await BankService.GetBankAccountByIdAsync(Id.Value);
+                if (existing != null)
+                {
+                    account = existing;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al cargar la cuenta bancaria");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        isSaving = true;
+        try
+        {
+            if (Id.HasValue)
+            {
+                await BankService.UpdateBankAccountAsync(account);
+            }
+            else
+            {
+                await BankService.CreateBankAccountAsync(account);
+            }
+
+            Navigation.NavigateTo("/banco");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al guardar la cuenta bancaria");
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private void Cancel()
+    {
+        Navigation.NavigateTo("/banco");
+    }
+}

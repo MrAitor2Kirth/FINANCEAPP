@@ -35,7 +35,29 @@ namespace FINANCEAPP.Models
         public DateTime? CloseDate { get; set; }
 
         /// <summary>
-        /// Importe de la operación
+        /// Precio por acción en el momento de la operación
+        /// </summary>
+        [Column(TypeName = "decimal(18,2)")]
+        [Range(0, 999999999.99, ErrorMessage = "El precio por acción debe ser mayor o igual a 0")]
+        [Display(Name = "Precio por Acción")]
+        public decimal PricePerShare { get; set; }
+
+        /// <summary>
+        /// Número de acciones compradas o vendidas
+        /// </summary>
+        [Display(Name = "Número de Acciones")]
+        public int NumberOfShares { get; set; }
+
+        /// <summary>
+        /// Importe de comisiones asociadas a la operación
+        /// </summary>
+        [Column(TypeName = "decimal(18,2)")]
+        [Range(0, 999999999.99, ErrorMessage = "Las comisiones deben ser mayor o igual a 0")]
+        [Display(Name = "Comisiones")]
+        public decimal Commission { get; set; }
+
+        /// <summary>
+        /// Importe de la operación (PricePerShare × NumberOfShares + Commission)
         /// </summary>
         [Required(ErrorMessage = "El importe es obligatorio")]
         [Column(TypeName = "decimal(18,2)")]

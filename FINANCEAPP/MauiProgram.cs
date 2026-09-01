@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using FINANCEAPP.Data;
 using FINANCEAPP.Services;
@@ -25,7 +25,6 @@ namespace FINANCEAPP
 #endif
 
             // Configuración de la ruta de la base de datos SQLite
-            // La base de datos se almacenará en la carpeta AppData de la aplicación
             var dbPath = Path.Combine(FileSystem.AppDataDirectory, "financeapp.db");
 
             // Registro de Entity Framework Core con SQLite
@@ -45,22 +44,18 @@ namespace FINANCEAPP
             var app = builder.Build();
 
             // Inicialización de la base de datos
-            // Crea la base de datos y aplica las migraciones si no existe
+            // Solo crear si no existe; los datos persisten entre ejecuciones
             using (var scope = app.Services.CreateScope())
             {
                 var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                context.Database.EnsureCreated();
+
+                // Migración ligera y segura: añade columnas nuevas si faltan, sin recrear ni borrar datos.
+                DatabaseSchemaUpgrader.EnsureCompanyDetailsColumns(context);
 
 #if DEBUG
-                // En modo DEBUG, eliminar y recrear la base de datos para asegurar el esquema actualizado
-                // ADVERTENCIA: Esto eliminará todos los datos existentes
-                context.Database.EnsureDeleted();
-                context.Database.EnsureCreated();
-
                 var logger = scope.ServiceProvider.GetRequiredService<ILogger<AppDbContext>>();
-                logger.LogInformation($"Base de datos recreada en: {dbPath}");
-#else
-                // En modo RELEASE, solo crear si no existe
-                context.Database.EnsureCreated();
+                logger.LogInformation($"Base de datos inicializada en: {dbPath}");
 #endif
             }
 

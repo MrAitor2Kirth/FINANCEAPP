@@ -27,6 +27,7 @@ namespace FINANCEAPP.Services
         public async Task<List<CompanyDetail>> GetAllAsync()
         {
             return await _context.CompanyDetails
+                .AsNoTracking()
                 .OrderBy(c => c.Name)
                 .ToListAsync();
         }
@@ -37,7 +38,8 @@ namespace FINANCEAPP.Services
         public async Task<CompanyDetail?> GetByIdAsync(int id)
         {
             return await _context.CompanyDetails
-                .FindAsync(id);
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == id);
         }
 
         /// <summary>
@@ -46,6 +48,7 @@ namespace FINANCEAPP.Services
         public async Task<CompanyDetail?> GetByTickerAsync(string ticker)
         {
             return await _context.CompanyDetails
+                .AsNoTracking()
                 .FirstOrDefaultAsync(c => c.Ticker == ticker);
         }
 
@@ -55,6 +58,7 @@ namespace FINANCEAPP.Services
         public async Task<List<CompanyDetail>> GetBySectorAsync(string sector)
         {
             return await _context.CompanyDetails
+                .AsNoTracking()
                 .Where(c => c.Sector == sector)
                 .OrderBy(c => c.Name)
                 .ToListAsync();
@@ -66,6 +70,7 @@ namespace FINANCEAPP.Services
         public async Task<List<CompanyDetail>> SearchByNameAsync(string searchTerm)
         {
             return await _context.CompanyDetails
+                .AsNoTracking()
                 .Where(c => c.Name.Contains(searchTerm))
                 .OrderBy(c => c.Name)
                 .ToListAsync();
@@ -77,6 +82,7 @@ namespace FINANCEAPP.Services
         public async Task<List<CompanyDetail>> GetByMinDividendYieldAsync(decimal minYield)
         {
             return await _context.CompanyDetails
+                .AsNoTracking()
                 .Where(c => c.DividendYield >= minYield)
                 .OrderByDescending(c => c.DividendYield)
                 .ToListAsync();
@@ -88,6 +94,7 @@ namespace FINANCEAPP.Services
         public async Task<List<CompanyDetail>> GetTopByDividendYieldAsync(int topCount = 10)
         {
             return await _context.CompanyDetails
+                .AsNoTracking()
                 .OrderByDescending(c => c.DividendYield)
                 .Take(topCount)
                 .ToListAsync();
@@ -110,22 +117,34 @@ namespace FINANCEAPP.Services
         /// </summary>
         public async Task<bool> UpdateAsync(CompanyDetail company)
         {
-            try
-            {
-                company.UpdatedAt = DateTime.Now;
-                _context.CompanyDetails.Update(company);
-                await _context.SaveChangesAsync();
-                return true;
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                // Verificar si la empresa aún existe
-                if (!await _context.CompanyDetails.AnyAsync(c => c.Id == company.Id))
-                {
-                    return false;
-                }
-                throw;
-            }
+            var existing = await _context.CompanyDetails.FindAsync(company.Id);
+            if (existing == null) return false;
+
+            existing.Name = company.Name;
+            existing.Ticker = company.Ticker;
+            existing.Sector = company.Sector;
+            existing.CurrentPrice = company.CurrentPrice;
+            existing.DividendYield = company.DividendYield;
+            existing.PlusvaliaReturnPercent = existing.CalculatePlusvaliaReturnPercent();
+            existing.DividendPlusvaliaReturnPercent = existing.CalculateDividendPlusvaliaReturnPercent();
+            existing.UpdatedAt = DateTime.Now;
+
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<bool> UpdateCurrentPriceAsync(string companyName, decimal price)
+        {
+            var company = await _context.CompanyDetails
+                .FirstOrDefaultAsync(c => c.Name == companyName);
+            if (company == null) return false;
+
+            company.CurrentPrice = price;
+            company.PlusvaliaReturnPercent = company.CalculatePlusvaliaReturnPercent();
+            company.DividendPlusvaliaReturnPercent = company.CalculateDividendPlusvaliaReturnPercent();
+            company.UpdatedAt = DateTime.Now;
+            await _context.SaveChangesAsync();
+            return true;
         }
 
         /// <summary>
@@ -170,6 +189,34 @@ namespace FINANCEAPP.Services
             }
 
             return await query.AnyAsync();
+        }
+
+        public async Task<decimal> RecalculateTotalInvestedAsync(string companyName)
+        {
+            var company = await _context.CompanyDetails.FirstOrDefaultAsync(c => c.Name == companyName);
+            if (company == null)
+            {
+                return 0m;
+            }
+
+            var openOperations = await _context.Operations
+                .Where(o => o.CompanyName == companyName && o.CloseDate == null)
+                .ToListAsync();
+
+            var total = openOperations.Sum(o => o.Amount);
+            var shares = openOperations.Sum(o => o.NumberOfShares);
+            var dividends = await _context.Operations
+                .Where(o => o.CompanyName == companyName && o.Type == "Dividendo")
+                .SumAsync(o => (decimal?)o.Amount) ?? 0m;
+
+            company.TotalInvestedInitial = total;
+            company.NumberOfShares = shares;
+            company.TotalDividends = dividends;
+            company.PlusvaliaReturnPercent = company.CalculatePlusvaliaReturnPercent();
+            company.DividendPlusvaliaReturnPercent = company.CalculateDividendPlusvaliaReturnPercent();
+            company.UpdatedAt = DateTime.Now;
+            await _context.SaveChangesAsync();
+            return total;
         }
     }
 }

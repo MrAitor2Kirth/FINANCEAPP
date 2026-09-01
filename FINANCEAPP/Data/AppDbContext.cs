@@ -458,7 +458,8 @@ namespace FINANCEAPP.Data
                     Sector = "Tecnología",
                     CurrentPrice = 415.50m,
                     DividendYield = 0.75m,
-                    TotalInvested = 5000.00m,
+                    TotalInvestedInitial = 5000.00m,
+                    NumberOfShares = 12,
                     CreatedAt = DateTime.Now.AddMonths(-3),
                     UpdatedAt = DateTime.Now.AddMonths(-3)
                 },
@@ -470,7 +471,8 @@ namespace FINANCEAPP.Data
                     Sector = "Tecnología",
                     CurrentPrice = 225.30m,
                     DividendYield = 0.45m,
-                    TotalInvested = 1500.00m,
+                    TotalInvestedInitial = 0.00m,
+                    NumberOfShares = 0,
                     CreatedAt = DateTime.Now.AddMonths(-3),
                     UpdatedAt = DateTime.Now.AddMonths(-3)
                 },
@@ -482,7 +484,8 @@ namespace FINANCEAPP.Data
                     Sector = "Consumo",
                     CurrentPrice = 63.20m,
                     DividendYield = 3.10m,
-                    TotalInvested = 2500.00m,
+                    TotalInvestedInitial = 2500.00m,
+                    NumberOfShares = 40,
                     CreatedAt = DateTime.Now.AddMonths(-2),
                     UpdatedAt = DateTime.Now.AddMonths(-2)
                 },
@@ -494,7 +497,8 @@ namespace FINANCEAPP.Data
                     Sector = "Salud",
                     CurrentPrice = 158.75m,
                     DividendYield = 3.05m,
-                    TotalInvested = 4000.00m,
+                    TotalInvestedInitial = 4000.00m,
+                    NumberOfShares = 25,
                     CreatedAt = DateTime.Now.AddMonths(-2),
                     UpdatedAt = DateTime.Now.AddMonths(-2)
                 },
@@ -506,7 +510,8 @@ namespace FINANCEAPP.Data
                     Sector = "Consumo",
                     CurrentPrice = 168.90m,
                     DividendYield = 2.35m,
-                    TotalInvested = 0.00m,
+                    TotalInvestedInitial = 0.00m,
+                    NumberOfShares = 0,
                     CreatedAt = DateTime.Now.AddMonths(-1),
                     UpdatedAt = DateTime.Now.AddMonths(-1)
                 }
@@ -520,6 +525,8 @@ namespace FINANCEAPP.Data
                     CompanyName = "Microsoft Corporation",
                     Type = "Compra",
                     Date = DateTime.Now.AddMonths(-3),
+                    PricePerShare = 416.67m,
+                    NumberOfShares = 12,
                     Amount = 5000.00m,
                     CreatedAt = DateTime.Now.AddMonths(-3)
                 },
@@ -529,6 +536,8 @@ namespace FINANCEAPP.Data
                     CompanyName = "Apple Inc.",
                     Type = "Compra",
                     Date = DateTime.Now.AddMonths(-2),
+                    PricePerShare = 214.29m,
+                    NumberOfShares = 14,
                     Amount = 3000.00m,
                     CreatedAt = DateTime.Now.AddMonths(-2)
                 },
@@ -538,6 +547,8 @@ namespace FINANCEAPP.Data
                     CompanyName = "Coca-Cola Company",
                     Type = "Compra",
                     Date = DateTime.Now.AddMonths(-2),
+                    PricePerShare = 62.50m,
+                    NumberOfShares = 40,
                     Amount = 2500.00m,
                     CreatedAt = DateTime.Now.AddMonths(-2)
                 },
@@ -557,6 +568,8 @@ namespace FINANCEAPP.Data
                     Type = "Venta",
                     Date = DateTime.Now.AddDays(-15),
                     CloseDate = DateTime.Now.AddDays(-15),
+                    PricePerShare = 214.29m,
+                    NumberOfShares = 14,
                     Amount = 1500.00m,
                     CreatedAt = DateTime.Now.AddDays(-15)
                 },
@@ -566,6 +579,8 @@ namespace FINANCEAPP.Data
                     CompanyName = "Johnson & Johnson",
                     Type = "Compra",
                     Date = DateTime.Now.AddDays(-10),
+                    PricePerShare = 160.00m,
+                    NumberOfShares = 25,
                     Amount = 4000.00m,
                     CreatedAt = DateTime.Now.AddDays(-10)
                 },

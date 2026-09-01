@@ -99,6 +99,12 @@
                                 <th scope="col" class="text-center">Ticker</th>
                                 <th scope="col">Sector</th>
                                 <th scope="col" class="text-end">Precio Actual</th>
+                                <th scope="col" class="text-end">Total Invertido Inicial</th>
+                                <th scope="col" class="text-end">Número de Acciones</th>
+                                <th scope="col" class="text-end">Total Valor Invertido</th>
+                                <th scope="col" class="text-end">Total Dividendos</th>
+                                <th scope="col" class="text-center">Rentabilidad</th>
+                                <th scope="col" class="text-center">Rentabilidad + Div.</th>
                                 <th scope="col" class="text-center">Dividend Yield</th>
                                 <th scope="col" class="text-center">Información</th>
                                 <th scope="col" class="text-center">Acciones</th>
@@ -124,6 +130,28 @@
                                     </td>
                                     <td class="text-end align-middle">
                                         <strong class="text-success">@company.CurrentPrice.ToString("C2")</strong>
+                                    </td>
+                                    <td class="text-end align-middle">
+                                        <strong class="text-primary">@company.TotalInvestedInitial.ToString("C2")</strong>
+                                    </td>
+                                    <td class="text-end align-middle">
+                                        @company.NumberOfShares
+                                    </td>
+                                    <td class="text-end align-middle">
+                                        <strong class="text-primary">@company.TotalInvestedValue.ToString("C2")</strong>
+                                    </td>
+                                    <td class="text-end align-middle">
+                                        <strong class="text-success">@company.TotalDividends.ToString("C2")</strong>
+                                    </td>
+                                    <td class="text-center align-middle">
+                                        <span class="badge @GetPerformanceBadgeClass(company.PlusvaliaReturnPercent)">
+                                            @company.PlusvaliaReturnPercent.ToString("N2")%
+                                        </span>
+                                    </td>
+                                    <td class="text-center align-middle">
+                                        <span class="badge @GetPerformanceBadgeClass(company.DividendPlusvaliaReturnPercent)">
+                                            @company.DividendPlusvaliaReturnPercent.ToString("N2")%
+                                        </span>
                                     </td>
                                     <td class="text-center align-middle">
                                         @if (company.DividendYield > 0)
@@ -400,5 +428,17 @@
             return "bg-warning text-dark";
         else
             return "bg-info text-dark";
+    }
+
+    private string GetPerformanceBadgeClass(decimal value)
+    {
+        if (value >= 10m)
+            return "bg-success";
+        else if (value >= 0m)
+            return "bg-primary";
+        else if (value >= -10m)
+            return "bg-warning text-dark";
+        else
+            return "bg-danger";
     }
 }

@@ -67,13 +67,95 @@ namespace FINANCEAPP.Models
         public DateTime UpdatedAt { get; set; } = DateTime.Now;
 
         /// <summary>
-        /// Total invertido actualmente en la empresa
-        /// Se calcula desde Operations (Compras - Ventas)
-        /// Si hay operaciones cerradas, solo suma las posteriores a la última fecha de cierre
+        /// Total invertido inicialmente en la empresa
+        /// Se calcula sumando el importe de las operaciones de acciones abiertas (no cerradas) de la empresa
         /// </summary>
         [Column(TypeName = "decimal(18,2)")]
-        [Display(Name = "Total Invertido")]
-        public decimal TotalInvested { get; set; }
+        [Display(Name = "Total Invertido Inicial")]
+        public decimal TotalInvestedInitial { get; set; }
+
+        /// <summary>
+        /// Total acumulado de dividendos recibidos para la empresa.
+        /// Suma los importes de las operaciones de tipo Dividendo.
+        /// </summary>
+        [Column(TypeName = "decimal(18,2)")]
+        [Display(Name = "Total Dividendos")]
+        public decimal TotalDividends { get; set; }
+
+        /// <summary>
+        /// Rentabilidad por plusvalía expresada en porcentaje.
+        /// Fórmula: ((TotalValorInvertido - TotalInvertidoInicial) / TotalInvertidoInicial) * 100
+        /// </summary>
+        [Column(TypeName = "decimal(18,2)")]
+        [Display(Name = "Rentabilidad Plusvalías (%)")]
+        public decimal PlusvaliaReturnPercent { get; set; }
+
+        /// <summary>
+        /// Rentabilidad con dividendos expresada en porcentaje.
+        /// Fórmula: ((TotalValorInvertido + TotalDividendos - TotalInvertidoInicial) / TotalInvertidoInicial) * 100
+        /// </summary>
+        [Column(TypeName = "decimal(18,2)")]
+        [Display(Name = "Rentabilidad con Dividendos (%)")]
+        public decimal DividendPlusvaliaReturnPercent { get; set; }
+
+        /// <summary>
+        /// Número de acciones actualmente en cartera
+        /// Se calcula sumando el número de acciones de las operaciones abiertas (no cerradas) de la empresa
+        /// </summary>
+        [Display(Name = "Número de Acciones")]
+        public int NumberOfShares { get; set; }
+
+        /// <summary>
+        /// Propiedad calculada que multiplica el precio actual por el número de acciones
+        /// No se mapea a la base de datos
+        /// </summary>
+        [NotMapped]
+        [Display(Name = "Total Valor Invertido")]
+        public decimal TotalInvestedValue => CurrentPrice * NumberOfShares;
+
+        /// <summary>
+        /// Propiedad calculada que devuelve la rentabilidad por plusvalía con formato de porcentaje.
+        /// </summary>
+        [NotMapped]
+        public string FormattedPlusvaliaReturn => $"{PlusvaliaReturnPercent:N2}%";
+
+        /// <summary>
+        /// Propiedad calculada que devuelve la rentabilidad con dividendos con formato de porcentaje.
+        /// </summary>
+        [NotMapped]
+        public string FormattedDividendPlusvaliaReturn => $"{DividendPlusvaliaReturnPercent:N2}%";
+
+        /// <summary>
+        /// Propiedad calculada que devuelve el importe total de dividendos con formato monetario.
+        /// </summary>
+        [NotMapped]
+        public string FormattedTotalDividends => $"{TotalDividends:C2}";
+
+        /// <summary>
+        /// Calcula la rentabilidad por plusvalía para la empresa.
+        /// </summary>
+        public decimal CalculatePlusvaliaReturnPercent()
+        {
+            if (TotalInvestedInitial <= 0)
+            {
+                return 0m;
+            }
+
+            return ((TotalInvestedValue - TotalInvestedInitial) / TotalInvestedInitial) * 100m;
+        }
+
+        /// <summary>
+        /// Calcula la rentabilidad total con dividendos.
+        /// </summary>
+        public decimal CalculateDividendPlusvaliaReturnPercent()
+        {
+            if (TotalInvestedInitial <= 0)
+            {
+                return 0m;
+            }
+
+            return (((TotalInvestedValue + TotalDividends) - TotalInvestedInitial) / TotalInvestedInitial) * 100m;
+        }
 
         /// <summary>
         /// Propiedad calculada que genera la URL de Investing.com para esta empresa

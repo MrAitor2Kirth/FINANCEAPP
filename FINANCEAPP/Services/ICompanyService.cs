@@ -71,6 +71,13 @@ namespace FINANCEAPP.Services
         Task<bool> UpdateAsync(CompanyDetail company);
 
         /// <summary>
+        /// Actualiza únicamente el precio actual de una empresa
+        /// </summary>
+        /// <param name="companyName">Nombre de la empresa</param>
+        /// <param name="price">Nuevo precio actual</param>
+        Task<bool> UpdateCurrentPriceAsync(string companyName, decimal price);
+
+        /// <summary>
         /// Elimina una empresa del sistema
         /// </summary>
         /// <param name="id">Identificador de la empresa a eliminar</param>
@@ -90,5 +97,12 @@ namespace FINANCEAPP.Services
         /// <param name="excludeId">ID a excluir de la verificación (útil en actualizaciones)</param>
         /// <returns>True si el ticker ya existe</returns>
         Task<bool> TickerExistsAsync(string ticker, int? excludeId = null);
+
+        /// <summary>
+        /// Recalcula el importe total invertido de una empresa a partir de sus operaciones abiertas
+        /// </summary>
+        /// <param name="companyName">Nombre de la empresa</param>
+        /// <returns>Importe total sumado</returns>
+        Task<decimal> RecalculateTotalInvestedAsync(string companyName);
     }
 }

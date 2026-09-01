@@ -11,14 +11,17 @@ namespace FINANCEAPP.Services
     public class OperationService : IOperationService
     {
         private readonly AppDbContext _context;
+        private readonly ICompanyService _companyService;
 
         /// <summary>
         /// Constructor que inyecta el contexto de base de datos
         /// </summary>
         /// <param name="context">Contexto de Entity Framework</param>
-        public OperationService(AppDbContext context)
+        /// <param name="companyService">Servicio de empresas para recalcular importes</param>
+        public OperationService(AppDbContext context, ICompanyService companyService)
         {
             _context = context;
+            _companyService = companyService;
         }
 
         /// <summary>
@@ -92,6 +95,12 @@ namespace FINANCEAPP.Services
             operation.CreatedAt = DateTime.Now;
             _context.Operations.Add(operation);
             await _context.SaveChangesAsync();
+
+            if (!string.IsNullOrWhiteSpace(operation.CompanyName))
+            {
+                await _companyService.RecalculateTotalInvestedAsync(operation.CompanyName);
+            }
+
             return operation;
         }
 
@@ -102,13 +111,39 @@ namespace FINANCEAPP.Services
         {
             try
             {
-                _context.Operations.Update(operation);
+                var existing = await _context.Operations.FindAsync(operation.Id);
+                if (existing == null)
+                {
+                    return false;
+                }
+
+                var previousCompanyName = existing.CompanyName;
+
+                existing.CompanyName = operation.CompanyName;
+                existing.Type = operation.Type;
+                existing.Date = operation.Date;
+                existing.CloseDate = operation.CloseDate;
+                existing.Amount = operation.Amount;
+                existing.PricePerShare = operation.PricePerShare;
+                existing.NumberOfShares = operation.NumberOfShares;
+                existing.Commission = operation.Commission;
+
                 await _context.SaveChangesAsync();
+
+                if (!string.IsNullOrWhiteSpace(previousCompanyName))
+                {
+                    await _companyService.RecalculateTotalInvestedAsync(previousCompanyName);
+                }
+
+                if (!string.IsNullOrWhiteSpace(operation.CompanyName) && operation.CompanyName != previousCompanyName)
+                {
+                    await _companyService.RecalculateTotalInvestedAsync(operation.CompanyName);
+                }
+
                 return true;
             }
             catch (DbUpdateConcurrencyException)
             {
-                // Verificar si la operación aún existe
                 if (!await _context.Operations.AnyAsync(o => o.Id == operation.Id))
                 {
                     return false;
@@ -128,8 +163,15 @@ namespace FINANCEAPP.Services
                 return false;
             }
 
+            var companyName = operation.CompanyName;
             _context.Operations.Remove(operation);
             await _context.SaveChangesAsync();
+
+            if (!string.IsNullOrWhiteSpace(companyName))
+            {
+                await _companyService.RecalculateTotalInvestedAsync(companyName);
+            }
+
             return true;
         }
 

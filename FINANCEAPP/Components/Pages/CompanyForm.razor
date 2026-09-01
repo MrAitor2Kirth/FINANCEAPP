@@ -93,6 +93,7 @@
                                     <option value="Utilidades">Utilidades</option>
                                     <option value="Materiales">Materiales</option>
                                     <option value="Inmobiliario">Inmobiliario</option>
+                                    <option value="Seguros">Seguros</option>
                                 </InputSelect>
                                 <ValidationMessage For="@(() => company.Sector)" class="text-danger" />
                             </div>
@@ -134,6 +135,66 @@
                                     <ValidationMessage For="@(() => company.DividendYield)" class="text-danger" />
                                 </div>
                             </div>
+
+                            @if (Id.HasValue)
+                            {
+                                <div class="row">
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label fw-bold">Total Invertido Inicial</label>
+                                        <div class="input-group input-group-lg">
+                                            <span class="input-group-text">$</span>
+                                            <input class="form-control" value="@company.TotalInvestedInitial.ToString("N2")" readonly />
+                                        </div>
+                                        <small class="text-muted">
+                                            <i class="bi bi-info-circle me-1"></i>
+                                            Calculado a partir de las operaciones abiertas
+                                        </small>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label fw-bold">Número de Acciones</label>
+                                        <input class="form-control form-control-lg" value="@company.NumberOfShares" readonly />
+                                        <small class="text-muted">
+                                            <i class="bi bi-info-circle me-1"></i>
+                                            Calculado a partir de las operaciones abiertas
+                                        </small>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label fw-bold">Total Valor Invertido</label>
+                                        <div class="input-group input-group-lg">
+                                            <span class="input-group-text">$</span>
+                                            <input class="form-control" value="@company.TotalInvestedValue.ToString("N2")" readonly />
+                                        </div>
+                                        <small class="text-muted">
+                                            <i class="bi bi-info-circle me-1"></i>
+                                            Precio Actual × Número de Acciones
+                                        </small>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label fw-bold">Total Dividendos</label>
+                                        <div class="input-group input-group-lg">
+                                            <span class="input-group-text">$</span>
+                                            <input class="form-control" value="@company.TotalDividends.ToString("N2")" readonly />
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label fw-bold">Rentabilidad Plusvalías</label>
+                                        <div class="input-group input-group-lg">
+                                            <input class="form-control" value="@company.PlusvaliaReturnPercent.ToString("N2")" readonly />
+                                            <span class="input-group-text">%</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label fw-bold">Rentabilidad con Dividendos</label>
+                                        <div class="input-group input-group-lg">
+                                            <input class="form-control" value="@company.DividendPlusvaliaReturnPercent.ToString("N2")" readonly />
+                                            <span class="input-group-text">%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
 
                             <!-- Vista previa del enlace Investing -->
                             @if (!string.IsNullOrWhiteSpace(company.Ticker))

@@ -189,50 +189,17 @@ namespace FINANCEAPP.Services
         {
             try
             {
-                using (var transaction = await _context.Database.BeginTransactionAsync())
+                using var transaction = await _context.Database.BeginTransactionAsync();
+                try
                 {
-                    try
-                    {
-                        // 1. Obtener el activo
-                        var asset = await GetAssetByNameAsync(assetName);
-                        if (asset == null)
-                        {
-                            throw new InvalidOperationException($"No existe activo refugio llamado '{assetName}'");
-                        }
-
-                        // 2. Obtener todas las operaciones
-                        var operations = await GetOperationsByAssetNameAsync(assetName);
-
-                        // 3. Calcular el total invertido
-                        decimal totalInvested = 0;
-                        foreach (var op in operations)
-                        {
-                            if (op.Type == "Compra")
-                            {
-                                totalInvested += op.Amount;
-                            }
-                            else if (op.Type == "Venta")
-                            {
-                                totalInvested -= Math.Abs(op.Amount);
-                            }
-                        }
-
-                        // 4. Actualizar el total
-                        asset.TotalInvested = totalInvested;
-                        asset.UpdatedAt = DateTime.Now;
-                        _context.SafeHavenAssets.Update(asset);
-
-                        await _context.SaveChangesAsync();
-                        await transaction.CommitAsync();
-
-                        _logger.LogInformation($"Total invertido en '{assetName}' recalculado: {totalInvested}");
-                        return totalInvested;
-                    }
-                    catch (Exception ex)
-                    {
-                        await transaction.RollbackAsync();
-                        throw;
-                    }
+                    var total = await RecalculateAssetTotalInternalAsync(assetName);
+                    await transaction.CommitAsync();
+                    return total;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    throw;
                 }
             }
             catch (Exception ex)
@@ -240,6 +207,32 @@ namespace FINANCEAPP.Services
                 _logger.LogError(ex, $"Error al recalcular total de activo '{assetName}'");
                 throw;
             }
+        }
+
+        private async Task<decimal> RecalculateAssetTotalInternalAsync(string assetName)
+        {
+            var asset = await GetAssetByNameAsync(assetName);
+            if (asset == null)
+                throw new InvalidOperationException($"No existe activo refugio llamado '{assetName}'");
+
+            var operations = await GetOperationsByAssetNameAsync(assetName);
+
+            decimal totalInvested = 0;
+            foreach (var op in operations)
+            {
+                if (op.Type == "Compra")
+                    totalInvested += op.Amount;
+                else if (op.Type == "Venta")
+                    totalInvested -= Math.Abs(op.Amount);
+            }
+
+            asset.TotalInvested = totalInvested;
+            asset.UpdatedAt = DateTime.Now;
+            _context.SafeHavenAssets.Update(asset);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation($"Total invertido en '{assetName}' recalculado: {totalInvested}");
+            return totalInvested;
         }
         #endregion
 
@@ -278,34 +271,30 @@ namespace FINANCEAPP.Services
         {
             try
             {
-                using (var transaction = await _context.Database.BeginTransactionAsync())
+                using var transaction = await _context.Database.BeginTransactionAsync();
+                try
                 {
-                    try
-                    {
-                        // 1. Validar que el activo exista
-                        var asset = await GetAssetByNameAsync(operation.AssetName);
-                        if (asset == null)
-                        {
-                            throw new InvalidOperationException($"No existe activo refugio llamado '{operation.AssetName}'");
-                        }
+                    // 1. Validar que el activo exista
+                    var asset = await GetAssetByNameAsync(operation.AssetName);
+                    if (asset == null)
+                        throw new InvalidOperationException($"No existe activo refugio llamado '{operation.AssetName}'");
 
-                        // 2. Crear la operación
-                        _context.SafeHavenOperations.Add(operation);
-                        await _context.SaveChangesAsync();
+                    // 2. Crear la operación
+                    _context.SafeHavenOperations.Add(operation);
+                    await _context.SaveChangesAsync();
 
-                        // 3. Recalcular el total del activo
-                        await RecalculateAssetTotalAsync(operation.AssetName);
+                    // 3. Recalcular el total del activo (sin nueva transacción)
+                    await RecalculateAssetTotalInternalAsync(operation.AssetName);
 
-                        await transaction.CommitAsync();
+                    await transaction.CommitAsync();
 
-                        _logger.LogInformation($"Operación de activo '{operation.AssetName}' ({operation.Type}) creada exitosamente");
-                        return operation;
-                    }
-                    catch (Exception ex)
-                    {
-                        await transaction.RollbackAsync();
-                        throw;
-                    }
+                    _logger.LogInformation($"Operación de activo '{operation.AssetName}' ({operation.Type}) creada exitosamente");
+                    return operation;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    throw;
                 }
             }
             catch (Exception ex)
@@ -339,13 +328,13 @@ namespace FINANCEAPP.Services
                         _context.SafeHavenOperations.Update(existingOperation);
                         await _context.SaveChangesAsync();
 
-                        // Recalcular total del activo anterior
-                        await RecalculateAssetTotalAsync(oldAssetName);
+                        // Recalcular total del activo anterior (sin nueva transacción)
+                        await RecalculateAssetTotalInternalAsync(oldAssetName);
 
                         // Recalcular total del nuevo activo (si cambió)
                         if (oldAssetName != operation.AssetName)
                         {
-                            await RecalculateAssetTotalAsync(operation.AssetName);
+                            await RecalculateAssetTotalInternalAsync(operation.AssetName);
                         }
 
                         await transaction.CommitAsync();
@@ -385,8 +374,8 @@ namespace FINANCEAPP.Services
                         _context.SafeHavenOperations.Remove(operation);
                         await _context.SaveChangesAsync();
 
-                        // Recalcular el total del activo
-                        await RecalculateAssetTotalAsync(assetName);
+                        // Recalcular el total del activo (sin nueva transacción)
+                        await RecalculateAssetTotalInternalAsync(assetName);
 
                         await transaction.CommitAsync();
 
