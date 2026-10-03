@@ -47,7 +47,7 @@ namespace FINANCEAPP.Services
         /// <summary>
         /// Vende una propiedad (Opción C: crear operación + cambiar Status a Vendida)
         /// </summary>
-        Task<Property> SellPropertyAsync(int propertyId, decimal salePrice, string notes = "");
+        Task<Property> SellPropertyAsync(int propertyId, decimal salePrice, string notes = "", DateTime? saleDate = null);
 
         /// <summary>
         /// Elimina una propiedad y todas sus operaciones

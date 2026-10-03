@@ -44,9 +44,17 @@ namespace FINANCEAPP.Services
         Task<decimal> GetTotalInvestedAsync();
 
         /// <summary>
+        /// Obtiene el valor actual total de todos los activos refugio
+        /// </summary>
+        Task<decimal> GetTotalCurrentValueAsync();
+
+        /// <summary>
         /// Obtiene el desglose de inversión por tipo de activo
         /// </summary>
         Task<Dictionary<string, decimal>> GetInvestmentByAssetTypeAsync();
+
+
+
 
         /// <summary>
         /// Recalcula el total invertido de un activo desde sus operaciones

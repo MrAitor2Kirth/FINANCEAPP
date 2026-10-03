@@ -433,7 +433,7 @@ namespace FINANCEAPP.Services
         #endregion
 
         #region Plusvalías - Opción B: Historial de Valores
-        public async Task UpdateFundValueWithHistoryAsync(string fundName, decimal newValue)
+        public async Task UpdateFundValueWithHistoryAsync(string fundName, decimal newValue, string? notes = null)
         {
             try
             {
@@ -461,7 +461,9 @@ namespace FINANCEAPP.Services
                             Date = DateTime.Now,
                             ReturnAtDate = returnAtDate,
                             CreatedAt = DateTime.Now,
-                            Notes = $"Actualización automática del {DateTime.Now:dd/MM/yyyy}"
+                            Notes = string.IsNullOrWhiteSpace(notes)
+                                ? $"Actualización automática del {DateTime.Now:dd/MM/yyyy}"
+                                : notes.Trim()
                         };
 
                         _context.FundValueHistories.Add(valueHistory);
@@ -488,6 +490,49 @@ namespace FINANCEAPP.Services
             {
                 _logger.LogError(ex, $"Error en UpdateFundValueWithHistoryAsync para fondo '{fundName}'");
                 throw;
+            }
+        }
+
+        public async Task<bool> DeleteFundValueHistoryAsync(int historyId)
+        {
+            using (var transaction = await _context.Database.BeginTransactionAsync())
+            {
+                try
+                {
+                    var history = await _context.FundValueHistories.FindAsync(historyId);
+                    if (history == null)
+                    {
+                        return false;
+                    }
+
+                    var fundName = history.FundName;
+                    _context.FundValueHistories.Remove(history);
+                    await _context.SaveChangesAsync();
+
+                    // Si se borró el último valor, el fondo recupera el valor del registro anterior
+                    var latest = await _context.FundValueHistories
+                        .Where(h => h.FundName == fundName)
+                        .OrderByDescending(h => h.Date)
+                        .ThenByDescending(h => h.Id)
+                        .FirstOrDefaultAsync();
+
+                    var fund = await GetFundByNameAsync(fundName);
+                    if (fund != null && latest != null)
+                    {
+                        fund.CurrentValue = latest.Value;
+                        fund.UpdatedAt = DateTime.Now;
+                        _context.Funds.Update(fund);
+                        await _context.SaveChangesAsync();
+                    }
+
+                    await transaction.CommitAsync();
+                    return true;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    throw;
+                }
             }
         }
 

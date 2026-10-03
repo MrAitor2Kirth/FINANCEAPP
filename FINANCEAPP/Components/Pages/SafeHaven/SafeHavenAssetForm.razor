@@ -64,6 +64,16 @@
                                 </div>
                             </div>
 
+                            <div class="row mb-3">
+                                <div class="col-md-8">
+                                    <label class="form-label">Valor Actual (€) *</label>
+                                    <InputNumber class="form-control" placeholder="Ej: 5000.00"
+                                                 @bind-Value="asset.CurrentValue" step="0.01" />
+                                    <ValidationMessage For="@(() => asset.CurrentValue)" class="text-danger" />
+                                    <small class="text-muted">Se actualizará automáticamente al registrar operaciones</small>
+                                </div>
+                            </div>
+
                             @if (!string.IsNullOrEmpty(errorMessage))
                             {
                                 <div class="alert alert-danger" role="alert">

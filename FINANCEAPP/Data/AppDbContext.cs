@@ -90,6 +90,12 @@ namespace FINANCEAPP.Data
         public DbSet<PropertyOperation> PropertyOperations { get; set; }
 
         /// <summary>
+        /// DbSet de puntos históricos de cotización (caché OHLC diario por empresa)
+        /// Representa la tabla PriceHistoryPoints en la base de datos
+        /// </summary>
+        public DbSet<PriceHistoryPoint> PriceHistoryPoints { get; set; }
+
+        /// <summary>
         /// Configuración del modelo de datos
         /// Establece índices, relaciones y constraints adicionales
         /// </summary>
@@ -744,6 +750,7 @@ namespace FINANCEAPP.Data
                     Name = "Oro Físico",
                     AssetType = "Oro",
                     TotalInvested = 3000.00m,
+                    CurrentValue = 3200.00m,
                     CreatedAt = DateTime.Now.AddYears(-1),
                     UpdatedAt = DateTime.Now
                 },
@@ -753,6 +760,7 @@ namespace FINANCEAPP.Data
                     Name = "Bitcoin Core",
                     AssetType = "Bitcoin",
                     TotalInvested = 2000.00m,
+                    CurrentValue = 2100.00m,
                     CreatedAt = DateTime.Now.AddMonths(-8),
                     UpdatedAt = DateTime.Now
                 }
@@ -836,6 +844,23 @@ namespace FINANCEAPP.Data
                     CreatedAt = DateTime.Now.AddMonths(-1)
                 }
             );
+
+            // Configuración de la entidad PriceHistoryPoint
+            modelBuilder.Entity<PriceHistoryPoint>(entity =>
+            {
+                // Índice único por empresa + fecha, para evitar duplicados y agilizar el upsert
+                entity.HasIndex(e => new { e.CompanyId, e.Date })
+                    .IsUnique()
+                    .HasDatabaseName("IX_PriceHistoryPoints_CompanyId_Date");
+
+                entity.Property(e => e.Date)
+                    .IsRequired();
+
+                entity.HasOne(e => e.Company)
+                    .WithMany()
+                    .HasForeignKey(e => e.CompanyId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
         }
     }
 }

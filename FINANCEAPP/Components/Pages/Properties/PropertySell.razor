@@ -1,0 +1,183 @@
+@page "/inmuebles/vender/{id:int}"
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject IPropertyService PropertyService
+@inject NavigationManager Navigation
+@inject ILogger<PropertySell> Logger
+
+<PageTitle>Vender Propiedad</PageTitle>
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">Vender propiedad</h5>
+                </div>
+
+                <div class="card-body">
+                    @if (isLoading)
+                    {
+                        <div class="alert alert-info">Cargando...</div>
+                    }
+                    else if (property == null)
+                    {
+                        <div class="alert alert-danger">Propiedad no encontrada.</div>
+                        <button class="btn btn-secondary" @onclick="NavigateBack">Volver al listado</button>
+                    }
+                    else if (property.Status == "Vendida")
+                    {
+                        <div class="alert alert-warning">
+                            La propiedad <strong>@property.Name</strong> ya fue vendida
+                            @(property.SaleDate.HasValue ? $"el {property.SaleDate.Value:dd/MM/yyyy}" : "").
+                        </div>
+                        <button class="btn btn-secondary" @onclick="NavigateBack">Volver al listado</button>
+                    }
+                    else
+                    {
+                        <h5 class="mb-1">@property.Name</h5>
+                        <p class="text-muted">
+                            @property.PropertyType
+                            @if (!string.IsNullOrWhiteSpace(property.Address))
+                            {
+                                <span> · @property.Address</span>
+                            }
+                        </p>
+
+                        <div class="card bg-light mb-4">
+                            <div class="card-body">
+                                <h6 class="card-title">Situación actual</h6>
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <small class="text-muted d-block">Precio de compra</small>
+                                        <strong>@property.PurchasePrice.ToString("C")</strong>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <small class="text-muted d-block">Gastos acumulados</small>
+                                        <strong class="text-danger">@totalExpenses.ToString("C")</strong>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <small class="text-muted d-block">Ingresos acumulados</small>
+                                        <strong class="text-success">@totalIncome.ToString("C")</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Precio de venta (€) *</label>
+                                <InputNumber class="form-control" step="0.01" @bind-Value="salePrice" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Fecha de venta *</label>
+                                <InputDate class="form-control" @bind-Value="saleDate" />
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Notas</label>
+                            <InputTextArea class="form-control" rows="2" @bind-Value="notes" />
+                        </div>
+
+                        <div class="alert @(estimatedResult >= 0 ? "alert-success" : "alert-danger")">
+                            <strong>Resultado estimado de la inversión:</strong>
+                            @estimatedResult.ToString("C")
+                            <br />
+                            <small>
+                                Ingresos acumulados + precio de venta − (precio de compra + gastos acumulados)
+                            </small>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger" role="alert">@errorMessage</div>
+                        }
+
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-success" @onclick="ConfirmSale" disabled="@isSubmitting">
+                                @(isSubmitting ? "Registrando venta..." : "Confirmar venta")
+                            </button>
+                            <button class="btn btn-secondary" @onclick="NavigateBack" disabled="@isSubmitting">
+                                Cancelar
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private Property? property;
+    private bool isLoading = true;
+    private bool isSubmitting = false;
+    private string errorMessage = string.Empty;
+
+    private decimal salePrice;
+    private DateTime saleDate = DateTime.Today;
+    private string notes = string.Empty;
+
+    private decimal totalIncome;
+    private decimal totalExpenses;
+
+    // Misma fórmula que aplica PropertyService.SellPropertyAsync al consolidar la venta
+    private decimal estimatedResult =>
+        property == null
+            ? 0m
+            : (totalIncome + salePrice) - (property.PurchasePrice + Math.Abs(totalExpenses));
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            property = await PropertyService.GetPropertyByIdAsync(Id);
+            if (property != null)
+            {
+                totalIncome = await PropertyService.GetTotalIncomeAsync(property.Name);
+                totalExpenses = await PropertyService.GetTotalExpensesAsync(property.Name);
+                salePrice = property.CurrentValue ?? property.PurchasePrice;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error cargando la propiedad a vender");
+            errorMessage = "Error al cargar la propiedad";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task ConfirmSale()
+    {
+        errorMessage = string.Empty;
+
+        if (salePrice <= 0)
+        {
+            errorMessage = "El precio de venta debe ser mayor que 0";
+            return;
+        }
+
+        isSubmitting = true;
+        try
+        {
+            await PropertyService.SellPropertyAsync(Id, salePrice, notes?.Trim() ?? string.Empty, saleDate);
+            Navigation.NavigateTo("/inmuebles");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error registrando la venta de la propiedad");
+            errorMessage = $"Error al registrar la venta: {ex.Message}";
+            isSubmitting = false;
+        }
+    }
+
+    private void NavigateBack() => Navigation.NavigateTo("/inmuebles");
+}

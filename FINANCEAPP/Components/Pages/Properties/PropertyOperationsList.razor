@@ -96,6 +96,14 @@ else
                    @bind="newOperation.Description" />
         </div>
     </div>
+    @if (!string.IsNullOrEmpty(validationMessage))
+    {
+        <div class="alert alert-warning mt-2 py-1 px-2 mb-0"><small>@validationMessage</small></div>
+    }
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger mt-2 py-1 px-2 mb-0"><small>@errorMessage</small></div>
+    }
 </div>
 
 @code {
@@ -110,6 +118,8 @@ else
 
     private List<PropertyOperation> operations = new();
     private PropertyOperation newOperation = new();
+    private string validationMessage = string.Empty;
+    private string errorMessage = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -131,8 +141,22 @@ else
 
     private async Task AddOperation()
     {
-        if (string.IsNullOrEmpty(newOperation.Category) || string.IsNullOrEmpty(newOperation.Type) || newOperation.Amount <= 0)
+        validationMessage = string.Empty;
+        errorMessage = string.Empty;
+
+        if (string.IsNullOrEmpty(newOperation.Category))
         {
+            validationMessage = "Selecciona una categoría.";
+            return;
+        }
+        if (string.IsNullOrEmpty(newOperation.Type))
+        {
+            validationMessage = "Selecciona un tipo.";
+            return;
+        }
+        if (newOperation.Amount <= 0)
+        {
+            validationMessage = "La cantidad debe ser mayor que 0.";
             return;
         }
 
@@ -147,6 +171,7 @@ else
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error añadiendo operación");
+            errorMessage = $"Error al añadir la operación: {ex.Message}";
         }
     }
 

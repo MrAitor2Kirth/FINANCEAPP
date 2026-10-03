@@ -1,44 +1,268 @@
+/* ==========================================================================
+   FINANCEAPP · sistema visual "instrumento de precision"
+   Capa de diseno sobre Bootstrap: variables propias + sobrescritura de --bs-*.
+   ========================================================================== */
+
+/* Fuentes: si los .woff2 estan en wwwroot/fonts se usan; si no, cae a la fuente del sistema. */
+@font-face { font-family: "Bricolage Grotesque"; src: url("fonts/BricolageGrotesque-Variable.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
+@font-face { font-family: "Instrument Sans"; src: url("fonts/InstrumentSans-Variable.woff2") format("woff2"); font-weight: 400 700; font-display: swap; }
+@font-face { font-family: "Spline Sans Mono"; src: url("fonts/SplineSansMono-Variable.woff2") format("woff2"); font-weight: 300 700; font-display: swap; }
+
+:root {
+    --paper: #EEF1F4;
+    --surface: #FFFFFF;
+    --ink: #14213D;
+    --ink-soft: #4B5668;
+    --line: #D6DCE4;
+    --line-soft: #E6EAF0;
+    --gain: #0F7B6C;
+    --loss: #B3392F;
+    --brass: #B8893B;
+    --brass-ink: #7D5A1B;
+    --slate: #4F6D8F;
+    --radius: 10px;
+
+    --font-display: "Bricolage Grotesque", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Spline Sans Mono", "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+
+    /* Bootstrap 5.3 */
+    --bs-body-bg: var(--paper);
+    --bs-body-color: var(--ink);
+    --bs-body-font-family: var(--font-body);
+    --bs-secondary-color: var(--ink-soft);
+    --bs-border-color: var(--line);
+    --bs-link-color-rgb: 20, 33, 61;
+    --bs-primary-rgb: 20, 33, 61;
+    --bs-secondary-rgb: 75, 86, 104;
+    --bs-success-rgb: 15, 123, 108;
+    --bs-danger-rgb: 179, 57, 47;
+    --bs-warning-rgb: 125, 90, 27;
+    --bs-info-rgb: 79, 109, 143;
+}
+
 html, body {
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-family: var(--font-body);
+    background: var(--paper);
+    color: var(--ink);
 }
 
-a, .btn-link {
-    color: #006bb7;
+h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4, .h5, .h6, .display-5 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
 }
 
-.btn-primary {
-    color: #fff;
-    background-color: #1b6ec2;
-    border-color: #1861ac;
+h1, .h1, .display-5 { font-weight: 600; letter-spacing: -0.02em; }
+
+h1:focus { outline: none; }
+
+.text-muted { color: var(--ink-soft) !important; }
+
+a, .btn-link { color: var(--ink); text-decoration-color: var(--brass); text-underline-offset: 3px; }
+a:hover { color: var(--brass-ink); }
+
+/* Foco visible para teclado */
+:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-select:focus, .form-check-input:focus {
+    box-shadow: 0 0 0 0.2rem rgba(184, 137, 59, 0.35);
+    border-color: var(--ink);
 }
 
-.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+/* ---- Botones ---------------------------------------------------------- */
+.btn { border-radius: 8px; font-weight: 500; }
+
+.btn-primary, .btn-success, .btn-danger, .btn-warning, .btn-info, .btn-secondary {
+    --bs-btn-color: #fff;
+    --bs-btn-bg: var(--c);
+    --bs-btn-border-color: var(--c);
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: color-mix(in srgb, var(--c) 85%, #000);
+    --bs-btn-hover-border-color: color-mix(in srgb, var(--c) 85%, #000);
+    --bs-btn-active-color: #fff;
+    --bs-btn-active-bg: color-mix(in srgb, var(--c) 72%, #000);
+    --bs-btn-active-border-color: color-mix(in srgb, var(--c) 72%, #000);
+    --bs-btn-disabled-color: #fff;
+    --bs-btn-disabled-bg: var(--c);
+    --bs-btn-disabled-border-color: var(--c);
 }
 
-.content {
-    padding-top: 1.1rem;
+.btn-outline-primary, .btn-outline-success, .btn-outline-danger, .btn-outline-warning, .btn-outline-info, .btn-outline-secondary {
+    --bs-btn-color: var(--c);
+    --bs-btn-border-color: var(--c);
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: var(--c);
+    --bs-btn-hover-border-color: var(--c);
+    --bs-btn-active-color: #fff;
+    --bs-btn-active-bg: var(--c);
+    --bs-btn-active-border-color: var(--c);
+    --bs-btn-disabled-color: var(--c);
+    --bs-btn-disabled-border-color: var(--c);
 }
 
-h1:focus {
-    outline: none;
+.btn-primary, .btn-outline-primary { --c: var(--ink); }
+.btn-success, .btn-outline-success { --c: var(--gain); }
+.btn-danger, .btn-outline-danger { --c: var(--loss); }
+.btn-warning, .btn-outline-warning { --c: var(--brass-ink); }
+.btn-info, .btn-outline-info { --c: var(--slate); }
+.btn-secondary, .btn-outline-secondary { --c: var(--ink-soft); }
+
+/* ---- Tarjetas --------------------------------------------------------- */
+.card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: none;
 }
 
+.shadow-sm, .shadow { box-shadow: none !important; }
+
+.card-header:not([class*="bg-"]) {
+    background: transparent;
+    border-bottom: 1px solid var(--line-soft);
+    font-family: var(--font-display);
+}
+
+.card-header[class*="bg-"] { border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0; }
+
+/* ---- Tablas ----------------------------------------------------------- */
+.table {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--ink);
+    --bs-table-border-color: var(--line-soft);
+    --bs-table-striped-bg: rgba(20, 33, 61, 0.025);
+    --bs-table-striped-color: var(--ink);
+    --bs-table-hover-bg: rgba(184, 137, 59, 0.08);
+    --bs-table-hover-color: var(--ink);
+}
+
+.table-light {
+    --bs-table-bg: var(--paper);
+    --bs-table-color: var(--ink-soft);
+    --bs-table-border-color: var(--line);
+}
+
+.table thead th {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    white-space: nowrap;
+}
+
+/* Cifras alineadas: importes en tipografia monoespaciada con numeros tabulares */
+.table td.text-end, .table th.text-end, .table tfoot td {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.9em;
+}
+
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---- Avisos ----------------------------------------------------------- */
+.alert {
+    --bs-alert-bg: var(--surface);
+    --bs-alert-color: var(--ink);
+    --bs-alert-border-color: var(--line);
+    border-left-width: 4px;
+    border-radius: 8px;
+}
+.alert-success { border-left-color: var(--gain); }
+.alert-danger { border-left-color: var(--loss); }
+.alert-warning { border-left-color: var(--brass); }
+.alert-info { border-left-color: var(--slate); }
+
+/* ---- Formularios ------------------------------------------------------ */
+.form-control, .form-select { border-radius: 8px; border-color: var(--line); }
+.form-label { font-size: 0.85rem; font-weight: 600; color: var(--ink-soft); }
+
+/* ---- Utilidades de pagina -------------------------------------------- */
+.eyebrow {
+    margin: 0 0 0.25rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.page-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.75rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+.page-head h1 { margin: 0; font-size: 1.9rem; }
+.page-sub { margin: 0.2rem 0 0; font-size: 0.9rem; color: var(--ink-soft); }
+
+.section-title {
+    margin: 2rem 0 0.75rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    font-family: var(--font-body);
+    color: var(--ink-soft);
+}
+
+/* ---- Inicio ----------------------------------------------------------- */
+.home-hero {
+    padding: 2rem 0 1.5rem;
+    border-bottom: 1px solid var(--line);
+}
+.home-balance {
+    margin: 0 0 1.25rem;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    font-size: clamp(2rem, 6vw, 3.5rem);
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+}
+
+.module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 0.75rem;
+}
+.module {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1rem 1.1rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease;
+}
+.module:hover { border-color: var(--brass); color: var(--ink); }
+.module-name { font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; }
+.module-desc { font-size: 0.85rem; color: var(--ink-soft); }
+
+@media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+}
+
+/* ---- Heredado de la plantilla Blazor (se conserva) -------------------- */
 .valid.modified:not([type=checkbox]) {
-    outline: 1px solid #26b050;
+    outline: 1px solid var(--gain);
 }
 
 .invalid {
-    outline: 1px solid #e50000;
+    outline: 1px solid var(--loss);
 }
 
 .validation-message {
-    color: #e50000;
+    color: var(--loss);
 }
 
 #blazor-error-ui {
     color-scheme: light only;
-    background: lightyellow;
+    background: #FFF6D6;
     bottom: 0;
     box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
     box-sizing: border-box;
@@ -90,7 +314,7 @@ h1:focus {
         position: sticky;
         top: 0;
         height: env(safe-area-inset-top);
-        background-color: #f7f7f7;
+        background-color: var(--paper);
         width: 100%;
         z-index: 1;
     }
@@ -100,32 +324,15 @@ h1:focus {
     }
 }
 
-/* Panel de Saldo Total */
-.balance-panel {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 16px;
-    padding: 2rem;
-    margin: 1rem;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-    text-align: center;
-    color: white;
-}
-
-.balance-label {
-    font-size: 0.9rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    opacity: 0.9;
-    margin-bottom: 0.5rem;
-}
-
-.balance-amount {
-    font-size: 2.5rem;
-    font-weight: bold;
-    margin-top: 0.5rem;
-}
-
-.content {
-    padding: 1rem;
+.company-chart-op-tooltip {
+    position: absolute;
+    z-index: 2000;
+    background: #212529;
+    color: #fff;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.25rem;
+    font-size: 0.8rem;
+    pointer-events: none;
+    box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.3);
+    white-space: nowrap;
 }

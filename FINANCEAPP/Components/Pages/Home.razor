@@ -1,52 +1,46 @@
 ﻿@page "/"
 @using FINANCEAPP.Services
 @inject IFinancialService FinancialService
-@inject NavigationManager Navigation
 
-<div class="balance-panel">
-    <div class="balance-label">Saldo Total</div>
-    <div class="balance-amount">@saldoTotal.ToString("C")</div>
-</div>
+<PageTitle>Inicio</PageTitle>
 
-<div class="content">
-    <h2>Bienvenido a tu app de finanzas</h2>
-    <p class="lead">Gestiona tus inversiones de manera profesional</p>
+<section class="home-hero">
+    <p class="eyebrow">Saldo total</p>
+    <p class="home-balance">@saldoTotal.ToString("C")</p>
+    <a class="btn btn-primary" href="dashboard">Ver el patrimonio completo</a>
+</section>
 
-    <div class="row mt-4">
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title text-primary">
-                        <i class="bi bi-graph-up-arrow"></i> Dashboard Financiero
-                    </h5>
-                    <p class="card-text">
-                        Accede al dashboard completo con todos tus registros financieros,
-                        crea nuevos registros y edita los existentes.
-                    </p>
-                    <button class="btn btn-primary" @onclick="GoToDashboard">
-                        <i class="bi bi-arrow-right-circle"></i> Ir al Dashboard
-                    </button>
-                </div>
-            </div>
-        </div>
+<h2 class="section-title">Módulos</h2>
 
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title text-success">
-                        <i class="bi bi-check-circle"></i> Funcionalidades
-                    </h5>
-                    <ul class="list-unstyled">
-                        <li><i class="bi bi-check text-success"></i> Crear registros financieros</li>
-                        <li><i class="bi bi-check text-success"></i> Editar registros existentes</li>
-                        <li><i class="bi bi-check text-success"></i> Eliminar registros con confirmación</li>
-                        <li><i class="bi bi-check text-success"></i> Visualiza tu patrimonio total</li>
-                        <li><i class="bi bi-check text-success"></i> Historial completo de inversiones</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-    </div>
+<div class="module-grid">
+    <a class="module" href="dashboard">
+        <span class="module-name">Dashboard</span>
+        <span class="module-desc">Patrimonio total, rendimiento, flujo de caja y alertas.</span>
+    </a>
+    <a class="module" href="companies">
+        <span class="module-name">Empresas</span>
+        <span class="module-desc">Acciones con precio en vivo y gráfico de cotización.</span>
+    </a>
+    <a class="module" href="fondos">
+        <span class="module-name">Fondos de Inversión</span>
+        <span class="module-desc">Aportaciones, reembolsos e historial de valores.</span>
+    </a>
+    <a class="module" href="activos-refugio">
+        <span class="module-name">Activos Refugio</span>
+        <span class="module-desc">Compras y ventas, con total invertido y valor actual.</span>
+    </a>
+    <a class="module" href="inmuebles">
+        <span class="module-name">Propiedades</span>
+        <span class="module-desc">Ingresos, gastos y venta de inmuebles.</span>
+    </a>
+    <a class="module" href="banco">
+        <span class="module-name">Cuentas Bancarias</span>
+        <span class="module-desc">Movimientos y saldo de cada cuenta.</span>
+    </a>
+    <a class="module" href="operations">
+        <span class="module-name">Operaciones Acciones</span>
+        <span class="module-desc">Compras, ventas y dividendos de todas las empresas.</span>
+    </a>
 </div>
 
 @code {
@@ -63,10 +57,5 @@
         {
             saldoTotal = 0m;
         }
-    }
-
-    private void GoToDashboard()
-    {
-        Navigation.NavigateTo("/dashboard");
     }
 }

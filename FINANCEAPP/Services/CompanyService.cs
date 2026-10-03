@@ -11,14 +11,16 @@ namespace FINANCEAPP.Services
     public class CompanyService : ICompanyService
     {
         private readonly AppDbContext _context;
+        private readonly IStockPriceService _stockPriceService;
 
         /// <summary>
         /// Constructor que inyecta el contexto de base de datos
         /// </summary>
         /// <param name="context">Contexto de Entity Framework</param>
-        public CompanyService(AppDbContext context)
+        public CompanyService(AppDbContext context, IStockPriceService stockPriceService)
         {
             _context = context;
+            _stockPriceService = stockPriceService;
         }
 
         /// <summary>
@@ -124,6 +126,7 @@ namespace FINANCEAPP.Services
             existing.Ticker = company.Ticker;
             existing.Sector = company.Sector;
             existing.CurrentPrice = company.CurrentPrice;
+            existing.LivePrice = company.LivePrice;
             existing.DividendYield = company.DividendYield;
             existing.PlusvaliaReturnPercent = existing.CalculatePlusvaliaReturnPercent();
             existing.DividendPlusvaliaReturnPercent = existing.CalculateDividendPlusvaliaReturnPercent();
@@ -158,9 +161,41 @@ namespace FINANCEAPP.Services
                 return false;
             }
 
-            _context.CompanyDetails.Remove(company);
-            await _context.SaveChangesAsync();
-            return true;
+            // Eliminación en cascada: operaciones de la empresa (vinculadas por nombre) y su
+            // histórico de cotización en caché, todo en una única transacción.
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var operations = await _context.Operations
+                    .Where(o => o.CompanyName == company.Name)
+                    .ToListAsync();
+                _context.Operations.RemoveRange(operations);
+
+                var priceHistory = await _context.PriceHistoryPoints
+                    .Where(p => p.CompanyId == company.Id)
+                    .ToListAsync();
+                _context.PriceHistoryPoints.RemoveRange(priceHistory);
+
+                _context.CompanyDetails.Remove(company);
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return true;
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        public async Task<int> CountOperationsAsync(string companyName)
+        {
+            if (string.IsNullOrWhiteSpace(companyName))
+            {
+                return 0;
+            }
+
+            return await _context.Operations.CountAsync(o => o.CompanyName == companyName);
         }
 
         /// <summary>
@@ -203,20 +238,106 @@ namespace FINANCEAPP.Services
                 .Where(o => o.CompanyName == companyName && o.CloseDate == null)
                 .ToListAsync();
 
-            var total = openOperations.Sum(o => o.Amount);
-            var shares = openOperations.Sum(o => o.NumberOfShares);
+            var total = openOperations
+                .Where(o => o.Type == "Compra" || o.Type == "Traspaso")
+                .Sum(o => o.Amount);
+
+            var soldAmount = openOperations
+                .Where(o => o.Type == "Venta")
+                .Sum(o => o.Amount);
+
+            var shares = openOperations
+                .Where(o => o.Type == "Compra" || o.Type == "Traspaso")
+                .Sum(o => o.NumberOfShares)
+                - openOperations
+                    .Where(o => o.Type == "Venta")
+                    .Sum(o => o.NumberOfShares);
+
             var dividends = await _context.Operations
                 .Where(o => o.CompanyName == companyName && o.Type == "Dividendo")
                 .SumAsync(o => (decimal?)o.Amount) ?? 0m;
 
-            company.TotalInvestedInitial = total;
+            var adjustedTotal = total - soldAmount;
+
+            company.TotalInvestedInitial = adjustedTotal;
             company.NumberOfShares = shares;
             company.TotalDividends = dividends;
             company.PlusvaliaReturnPercent = company.CalculatePlusvaliaReturnPercent();
             company.DividendPlusvaliaReturnPercent = company.CalculateDividendPlusvaliaReturnPercent();
             company.UpdatedAt = DateTime.Now;
             await _context.SaveChangesAsync();
-            return total;
+            return adjustedTotal;
+        }
+
+        public async Task<bool> RefreshLivePriceAsync(int companyId)
+        {
+            var company = await _context.CompanyDetails.FirstOrDefaultAsync(c => c.Id == companyId);
+            if (company == null || string.IsNullOrWhiteSpace(company.Ticker))
+            {
+                return false;
+            }
+
+            var livePrice = await _stockPriceService.GetLatestPriceAsync(company.Ticker);
+            if (livePrice.HasValue)
+            {
+                company.LivePrice = livePrice.Value;
+                company.LivePriceUpdatedAt = DateTime.Now;
+                company.LivePriceError = null;
+                await _context.SaveChangesAsync();
+                return true;
+            }
+
+            company.LivePriceError = "No se pudo obtener el precio en vivo";
+            company.LivePriceUpdatedAt = DateTime.Now;
+            await _context.SaveChangesAsync();
+            return false;
+        }
+
+        public async Task RefreshAllLivePricesAsync()
+        {
+            var companies = await _context.CompanyDetails
+                .Where(c => !string.IsNullOrWhiteSpace(c.Ticker))
+                .ToListAsync();
+
+            if (companies.Count == 0)
+            {
+                return;
+            }
+
+            var prices = await _stockPriceService.GetLatestPricesAsync(companies.Select(c => c.Ticker).Distinct());
+
+            foreach (var company in companies)
+            {
+                if (prices.TryGetValue(company.Ticker, out var newPrice) && newPrice.HasValue)
+                {
+                    company.LivePrice = newPrice.Value;
+                    company.LivePriceUpdatedAt = DateTime.Now;
+                    company.LivePriceError = null;
+                }
+                else
+                {
+                    company.LivePriceError = "No se pudo obtener el precio en vivo";
+                }
+            }
+
+            await _context.SaveChangesAsync();
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

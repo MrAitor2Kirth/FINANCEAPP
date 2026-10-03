@@ -99,37 +99,16 @@
                             <tr class="table-secondary">
                                 <td colspan="8">
                                     <div class="p-3">
-                                        <h6 class="mb-3">Operaciones del Fondo</h6>
+                                        <h6 class="mb-2">Aportaciones y reembolsos</h6>
+                                        <OperationsList FundName="@fund.Name" FundService="@FundService" OnOperationAdded="@RefreshFunds" />
 
-                                        <ul class="nav nav-tabs mb-3" role="tablist">
-                                            <li class="nav-item" role="presentation">
-                                                <button class="nav-link @(selectedPlusvaliaOption == "A" ? "active" : "")" 
-                                                        @onclick='() => selectedPlusvaliaOption = "A"' type="button">
-                                                    Opción A - Operación de Plusvalía
-                                                </button>
-                                            </li>
-                                            <li class="nav-item" role="presentation">
-                                                <button class="nav-link @(selectedPlusvaliaOption == "B" ? "active" : "")" 
-                                                        @onclick='() => selectedPlusvaliaOption = "B"' type="button">
-                                                    Opción B - Historial de Valores
-                                                </button>
-                                            </li>
-                                        </ul>
+                                        <hr class="my-4" />
 
-                                        @if (selectedPlusvaliaOption == "A")
-                                        {
-                                            <div class="tab-pane active">
-                                                <h6 class="mb-2">Operaciones Estándar</h6>
-                                                <OperationsList FundName="@fund.Name" FundService="@FundService" OnOperationAdded="@RefreshFunds" />
-                                            </div>
-                                        }
-                                        else
-                                        {
-                                            <div class="tab-pane active">
-                                                <h6 class="mb-2">Historial de Valores</h6>
-                                                <ValueHistoryList FundName="@fund.Name" FundService="@FundService" OnHistoryAdded="@RefreshFunds" />
-                                            </div>
-                                        }
+                                        <h6 class="mb-2">Historial de valores</h6>
+                                        <p class="text-muted small">
+                                            Cada valor registrado actualiza el valor actual del fondo y su rentabilidad.
+                                        </p>
+                                        <ValueHistoryList FundName="@fund.Name" FundService="@FundService" OnHistoryAdded="@RefreshFunds" />
                                     </div>
                                 </td>
                             </tr>
@@ -145,7 +124,6 @@
     private List<Fund> funds = new();
     private bool isLoading = true;
     private int? expandedFundId = null;
-    private string selectedPlusvaliaOption = "A";
 
     protected override async Task OnInitializedAsync()
     {

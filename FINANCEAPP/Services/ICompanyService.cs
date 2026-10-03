@@ -85,6 +85,11 @@ namespace FINANCEAPP.Services
         Task<bool> DeleteAsync(int id);
 
         /// <summary>
+        /// Cuenta las operaciones de acciones asociadas a una empresa (coincidencia exacta de nombre)
+        /// </summary>
+        Task<int> CountOperationsAsync(string companyName);
+
+        /// <summary>
         /// Obtiene todos los sectores únicos registrados
         /// </summary>
         /// <returns>Lista de nombres de sectores</returns>
@@ -104,5 +109,176 @@ namespace FINANCEAPP.Services
         /// <param name="companyName">Nombre de la empresa</param>
         /// <returns>Importe total sumado</returns>
         Task<decimal> RecalculateTotalInvestedAsync(string companyName);
+
+        /// <summary>
+        /// Actualiza el precio en vivo de una empresa desde Yahoo Finance.
+        /// </summary>
+        Task<bool> RefreshLivePriceAsync(int companyId);
+
+        /// <summary>
+        /// Actualiza el precio en vivo de todas las empresas que tienen ticker.
+        /// </summary>
+        Task RefreshAllLivePricesAsync();
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

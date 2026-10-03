@@ -110,6 +110,7 @@ namespace FINANCEAPP.Services
                 existingAsset.Name = asset.Name;
                 existingAsset.AssetType = asset.AssetType;
                 existingAsset.TotalInvested = asset.TotalInvested;
+                existingAsset.CurrentValue = asset.CurrentValue;
                 existingAsset.UpdatedAt = DateTime.Now;
 
                 _context.SafeHavenAssets.Update(existingAsset);
@@ -163,6 +164,20 @@ namespace FINANCEAPP.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error al calcular total invertido en activos refugio");
+                throw;
+            }
+        }
+
+        public async Task<decimal> GetTotalCurrentValueAsync()
+        {
+            try
+            {
+                return await _context.SafeHavenAssets
+                    .SumAsync(sa => sa.CurrentValue);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al calcular total valor actual en activos refugio");
                 throw;
             }
         }

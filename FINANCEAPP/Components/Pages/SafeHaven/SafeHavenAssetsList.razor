@@ -91,6 +91,7 @@
                         <th>Nombre</th>
                         <th>Tipo de Activo</th>
                         <th>Total Invertido</th>
+                        <th>Valor Actual</th>
                         <th>% del Total</th>
                     </tr>
                 </thead>
@@ -111,6 +112,7 @@
                                 </span>
                             </td>
                             <td class="text-end">@asset.TotalInvested.ToString("C")</td>
+                            <td class="text-end">@asset.CurrentValue.ToString("C")</td>
                             <td>
                                 <div class="progress" style="height: 20px;">
                                     <div class="progress-bar" role="progressbar"
@@ -145,6 +147,7 @@
     private SafeHavenAsset? selectedAsset = null;
     private bool showOperations = false;
     private decimal totalInvested = 0;
+    private decimal totalCurrentValue = 0;
     private Dictionary<string, decimal> assetBreakdown = new();
 
     protected override async Task OnInitializedAsync()
@@ -166,6 +169,7 @@
         {
             assets = await SafeHavenService.GetAllAssetsAsync();
             totalInvested = assets.Sum(a => a.TotalInvested);
+            totalCurrentValue = assets.Sum(a => a.CurrentValue);
 
             // Calcular desglose por tipo
             assetBreakdown = new Dictionary<string, decimal>();
@@ -174,10 +178,12 @@
                 if (assetBreakdown.ContainsKey(asset.AssetType))
                 {
                     assetBreakdown[asset.AssetType] += asset.TotalInvested;
+                    assetBreakdown[asset.AssetType] += asset.CurrentValue;
                 }
                 else
                 {
                     assetBreakdown[asset.AssetType] = asset.TotalInvested;
+                    assetBreakdown[asset.AssetType] = asset.CurrentValue;
                 }
             }
 

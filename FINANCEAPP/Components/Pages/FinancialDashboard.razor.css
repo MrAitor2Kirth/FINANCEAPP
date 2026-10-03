@@ -1,86 +1,73 @@
-/* Estilos para los modales del Dashboard Financiero */
+/* Dashboard financiero: patrimonio, reparto por clase y ajustes de tabla */
 
-/* Modal backdrop y animaciones */
-.modal.show {
-    animation: fadeIn 0.3s ease-in-out;
+.wealth {
+    padding: 0.5rem 0 1.5rem;
 }
 
-.modal-dialog {
-    animation: slideDown 0.3s ease-in-out;
+.wealth-total {
+    margin: 0 0 1rem;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    font-size: clamp(2.2rem, 6vw, 4rem);
+    letter-spacing: -0.035em;
+    line-height: 1;
 }
 
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
+.wealth-band {
+    display: flex;
+    gap: 3px;
+    height: 0.9rem;
 }
 
-@keyframes slideDown {
-    from {
-        transform: translateY(-50px);
-        opacity: 0;
-    }
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
+.wealth-seg {
+    flex-basis: 0;
+    min-width: 4px;
+    border-radius: 2px;
 }
 
-/* Inputs del formulario con mejor estilo */
-.form-control:focus {
-    border-color: #0d6efd;
-    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+.class-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 2rem;
 }
 
-.form-label {
-    margin-bottom: 0.5rem;
-    font-size: 0.9rem;
+.class-card {
+    padding: 0.9rem 1rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--swatch);
+    border-radius: var(--radius);
 }
 
-.form-label i {
-    margin-right: 0.25rem;
+.class-card p {
+    margin: 0;
 }
 
-/* Botones de acción en la tabla */
-.btn-sm {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.875rem;
+.class-name {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
 }
 
-/* Espaciado entre botones */
-.btn-outline-primary:hover {
-    transform: scale(1.05);
-    transition: transform 0.2s ease-in-out;
+.class-value {
+    margin: 0.2rem 0 0.35rem !important;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.35rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
 }
 
-.btn-outline-danger:hover {
-    transform: scale(1.05);
-    transition: transform 0.2s ease-in-out;
+.class-meta {
+    font-size: 0.82rem;
+    color: var(--ink-soft);
 }
 
-/* Alert con total calculado */
-.alert-success {
-    border-left: 5px solid #28a745;
-}
-
-/* Mejora de la tabla responsive */
 .table-responsive {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-}
-
-/* Badge de fecha */
-.badge {
-    font-size: 0.85rem;
-    padding: 0.4rem 0.6rem;
-}
-
-/* Tarjetas de resumen */
-.card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
-    transition: all 0.3s ease;
 }

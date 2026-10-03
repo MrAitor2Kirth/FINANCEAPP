@@ -16,7 +16,19 @@
                     </h1>
                     <p class="lead text-muted">Información detallada de empresas y oportunidades de inversión</p>
                 </div>
-                <div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-info btn-lg" @onclick="RefreshLivePricesInBackground" disabled="@isRefreshingLivePrices">
+                        @if (isRefreshingLivePrices)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                            <span>Actualizando...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-arrow-clockwise me-2"></i>
+                            <span>Actualizar Precios en Vivo</span>
+                        }
+                    </button>
                     <button class="btn btn-primary btn-lg" @onclick="CreateNewCompany">
                         <i class="bi bi-plus-circle me-2"></i>
                         Nueva Empresa
@@ -99,6 +111,7 @@
                                 <th scope="col" class="text-center">Ticker</th>
                                 <th scope="col">Sector</th>
                                 <th scope="col" class="text-end">Precio Actual</th>
+                                <th scope="col" class="text-end">Precio en Vivo</th>
                                 <th scope="col" class="text-end">Total Invertido Inicial</th>
                                 <th scope="col" class="text-end">Número de Acciones</th>
                                 <th scope="col" class="text-end">Total Valor Invertido</th>
@@ -130,6 +143,24 @@
                                     </td>
                                     <td class="text-end align-middle">
                                         <strong class="text-success">@company.CurrentPrice.ToString("C2")</strong>
+                                    </td>
+                                    <td class="text-end align-middle">
+                                        @if (company.LivePrice.HasValue)
+                                        {
+                                            <strong class="text-info">@company.LivePrice.Value.ToString("C2")</strong>
+                                            @if (company.LivePriceUpdatedAt.HasValue)
+                                            {
+                                                <div><small class="text-muted">@GetRelativeTime(company.LivePriceUpdatedAt.Value)</small></div>
+                                            }
+                                        }
+                                        else if (isRefreshingLivePrices)
+                                        {
+                                            <span class="spinner-border spinner-border-sm text-muted" role="status"></span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">N/D</span>
+                                        }
                                     </td>
                                     <td class="text-end align-middle">
                                         <strong class="text-primary">@company.TotalInvestedInitial.ToString("C2")</strong>
@@ -189,6 +220,12 @@
                                                     title="Eliminar empresa">
                                                 <i class="bi bi-trash-fill"></i>
                                             </button>
+                                            <button type="button" 
+                                                    class="btn btn-sm btn-outline-secondary" 
+                                                    @onclick="() => ShowChart(company)"
+                                                    title="Ver gráfico de cotización">
+                                                <i class="bi bi-bar-chart-line-fill"></i>
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -242,6 +279,14 @@
                         <strong>Ticker:</strong> @companyToDelete.Ticker<br/>
                         <strong>Sector:</strong> @companyToDelete.Sector
                     </div>
+                    @if (companyToDeleteOperationsCount > 0)
+                    {
+                        <div class="alert alert-danger">
+                            <i class="bi bi-exclamation-octagon-fill me-1"></i>
+                            Se eliminarán también sus <strong>@companyToDeleteOperationsCount operación(es)</strong>
+                            y el histórico de cotización guardado.
+                        </div>
+                    }
                     <p class="text-danger mb-0">
                         <i class="bi bi-exclamation-circle me-1"></i>
                         <strong>Esta acción no se puede deshacer.</strong>
@@ -275,6 +320,8 @@
     </div>
 </div>
 
+<CompanyChartModal @ref="chartModal" />
+
 @code {
     // Lista de empresas obtenidas del servicio
     private List<CompanyDetail>? companies;
@@ -286,11 +333,18 @@
     private bool showDeleteModal = false;
     private bool isDeleting = false;
     private CompanyDetail? companyToDelete = null;
+    private int companyToDeleteOperationsCount = 0;
+
+    // Referencia al modal del gráfico de cotización
+    private CompanyChartModal? chartModal;
 
     // Métricas calculadas
     private int uniqueSectorsCount => companies?.Select(c => c.Sector).Distinct().Count() ?? 0;
     private decimal averageDividendYield => companies?.Any() == true ? companies.Average(c => c.DividendYield) : 0;
     private decimal averagePrice => companies?.Any() == true ? companies.Average(c => c.CurrentPrice) : 0;
+
+    // Indicador de refresco de precios en vivo en segundo plano
+    private bool isRefreshingLivePrices = false;
 
     /// <summary>
     /// Método que se ejecuta cuando el componente se inicializa
@@ -299,6 +353,44 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadCompanies();
+    }
+
+    /// <summary>
+    /// Fuerza la actualización de precios en vivo de todas las empresas. Solo se ejecuta cuando
+    /// el usuario pulsa el botón "Actualizar Precios en Vivo".
+    /// </summary>
+    private async Task RefreshLivePricesInBackground()
+    {
+        try
+        {
+            isRefreshingLivePrices = true;
+            await CompanyService.RefreshAllLivePricesAsync();
+            await LoadCompanies();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al actualizar precios en vivo: {ex.Message}");
+        }
+        finally
+        {
+            isRefreshingLivePrices = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// Devuelve un texto relativo simple ("hace X min") a partir de una fecha.
+    /// </summary>
+    private string GetRelativeTime(DateTime dateTime)
+    {
+        var elapsed = DateTime.Now - dateTime;
+        if (elapsed.TotalSeconds < 60)
+            return "hace instantes";
+        if (elapsed.TotalMinutes < 60)
+            return $"hace {(int)elapsed.TotalMinutes} min";
+        if (elapsed.TotalHours < 24)
+            return $"hace {(int)elapsed.TotalHours} h";
+        return $"hace {(int)elapsed.TotalDays} d";
     }
 
     /// <summary>
@@ -343,10 +435,22 @@
     /// <summary>
     /// Muestra el modal de confirmación de eliminación
     /// </summary>
-    private void ConfirmDelete(CompanyDetail company)
+    private async Task ConfirmDelete(CompanyDetail company)
     {
         companyToDelete = company;
+        companyToDeleteOperationsCount = await CompanyService.CountOperationsAsync(company.Name);
         showDeleteModal = true;
+    }
+
+    /// <summary>
+    /// Abre el modal con el gráfico de cotización de la empresa seleccionada
+    /// </summary>
+    private async Task ShowChart(CompanyDetail company)
+    {
+        if (chartModal != null)
+        {
+            await chartModal.ShowAsync(company);
+        }
     }
 
     /// <summary>
@@ -355,6 +459,7 @@
     private void CancelDelete()
     {
         companyToDelete = null;
+        companyToDeleteOperationsCount = 0;
         showDeleteModal = false;
     }
 
@@ -378,6 +483,7 @@
                 // Cerrar el modal
                 showDeleteModal = false;
                 companyToDelete = null;
+                companyToDeleteOperationsCount = 0;
             }
             else
             {

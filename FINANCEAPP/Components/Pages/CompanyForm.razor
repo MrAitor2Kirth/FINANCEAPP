@@ -115,6 +115,31 @@
                                     <ValidationMessage For="@(() => company.CurrentPrice)" class="text-danger" />
                                 </div>
 
+                                <!-- Precio en Vivo -->
+                                <div class="col-md-6 mb-3">
+                                    <label for="livePrice" class="form-label fw-bold">
+                                        Precio en Vivo (Yahoo Finance)
+                                    </label>
+                                    <div class="input-group input-group-lg">
+                                        <span class="input-group-text">$</span>
+                                        <InputNumber id="livePrice"
+                                                     class="form-control"
+                                                     @bind-Value="company.LivePrice"
+                                                     step="0.01"
+                                                     placeholder="0.00" />
+                                    </div>
+                                    <ValidationMessage For="@(() => company.LivePrice)" class="text-danger" />
+                                    @if (company.LivePriceUpdatedAt.HasValue)
+                                    {
+                                        <div class="form-text">
+                                            <i class="bi bi-clock-history me-1"></i>
+                                            Última actualización: @company.LivePriceUpdatedAt.Value.ToString("g")
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+
+                            <div class="row">
                                 <!-- Dividend Yield -->
                                 <div class="col-md-6 mb-3">
                                     <label for="dividendYield" class="form-label fw-bold">
@@ -166,7 +191,7 @@
                                         </div>
                                         <small class="text-muted">
                                             <i class="bi bi-info-circle me-1"></i>
-                                            Precio Actual × Número de Acciones
+                                            Precio en Vivo (o Precio Actual si no hay) × Número de Acciones
                                         </small>
                                     </div>
                                 </div>
@@ -377,4 +402,5 @@
     {
         Navigation.NavigateTo("/companies");
     }
+
 }

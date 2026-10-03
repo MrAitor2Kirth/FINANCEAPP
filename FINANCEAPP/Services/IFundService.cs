@@ -109,7 +109,13 @@ namespace FINANCEAPP.Services
         /// OPCIÓN B - Actualiza el valor del fondo registrando en historial
         /// Solo actualiza Fund.CurrentValue y mantiene historial en tabla separada
         /// </summary>
-        Task UpdateFundValueWithHistoryAsync(string fundName, decimal newValue);
+        Task UpdateFundValueWithHistoryAsync(string fundName, decimal newValue, string? notes = null);
+
+        /// <summary>
+        /// Elimina un registro del historial de valores. Si era el más reciente, el valor actual
+        /// del fondo vuelve al del registro anterior (si existe).
+        /// </summary>
+        Task<bool> DeleteFundValueHistoryAsync(int historyId);
 
         /// <summary>
         /// OPCIÓN B - Obtiene el historial de valores de un fondo

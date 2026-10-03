@@ -43,6 +43,79 @@ namespace FINANCEAPP.Data
             }
         }
 
+        /// <summary>
+        /// Verifica que la tabla CompanyDetails tenga las columnas LivePrice y LivePriceUpdatedAt.
+        /// </summary>
+        public static void EnsureCompanyDetailLivePriceColumns(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var existingColumns = GetExistingColumns(connection, "CompanyDetails");
+
+                AddColumnIfMissing(connection, existingColumns, "CompanyDetails", "LivePrice", "decimal(18,2) NULL");
+                AddColumnIfMissing(connection, existingColumns, "CompanyDetails", "LivePriceUpdatedAt", "TEXT NULL");
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Crea la tabla PriceHistoryPoints si no existe todavía (para bases de datos
+        /// creadas antes de introducir la caché de histórico de cotización).
+        /// </summary>
+        public static void EnsurePriceHistoryTable(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""PriceHistoryPoints"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_PriceHistoryPoints"" PRIMARY KEY AUTOINCREMENT,
+                        ""CompanyId"" INTEGER NOT NULL,
+                        ""Date"" TEXT NOT NULL,
+                        ""Open"" decimal(18,4) NOT NULL,
+                        ""High"" decimal(18,4) NOT NULL,
+                        ""Low"" decimal(18,4) NOT NULL,
+                        ""Close"" decimal(18,4) NOT NULL,
+                        ""Volume"" INTEGER NOT NULL,
+                        ""FetchedAt"" TEXT NOT NULL,
+                        CONSTRAINT ""FK_PriceHistoryPoints_CompanyDetails_CompanyId"" FOREIGN KEY (""CompanyId"") REFERENCES ""CompanyDetails"" (""Id"") ON DELETE CASCADE
+                    );
+
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PriceHistoryPoints_CompanyId_Date"" ON ""PriceHistoryPoints"" (""CompanyId"", ""Date"");
+                ";
+                command.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
         private static HashSet<string> GetExistingColumns(System.Data.Common.DbConnection connection, string tableName)
         {
             var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

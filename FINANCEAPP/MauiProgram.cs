@@ -1,7 +1,149 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using FINANCEAPP.Data;
 using FINANCEAPP.Services;
+
+using System;
+using System.IO;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 namespace FINANCEAPP
 {
@@ -40,6 +182,8 @@ namespace FINANCEAPP
             builder.Services.AddScoped<ISafeHavenService, SafeHavenService>();
             builder.Services.AddScoped<IPropertyService, PropertyService>();
             builder.Services.AddScoped<IDashboardService, DashboardService>();
+            builder.Services.AddHttpClient<IStockPriceService, StockPriceService>();
+            builder.Services.AddScoped<IPriceHistoryService, PriceHistoryService>();
 
             var app = builder.Build();
 
@@ -52,6 +196,8 @@ namespace FINANCEAPP
 
                 // Migración ligera y segura: añade columnas nuevas si faltan, sin recrear ni borrar datos.
                 DatabaseSchemaUpgrader.EnsureCompanyDetailsColumns(context);
+                DatabaseSchemaUpgrader.EnsureCompanyDetailLivePriceColumns(context);
+                DatabaseSchemaUpgrader.EnsurePriceHistoryTable(context);
 
 #if DEBUG
                 var logger = scope.ServiceProvider.GetRequiredService<ILogger<AppDbContext>>();

@@ -53,7 +53,7 @@
                 <div class="card border-primary shadow-sm">
                     <div class="card-body">
                         <h6 class="card-subtitle mb-2 text-muted">Total Operaciones</h6>
-                        <h3 class="card-title text-primary mb-0">@operations.Count</h3>
+                        <h3 class="card-title text-primary mb-0">@filteredOperations.Count</h3>
                     </div>
                 </div>
             </div>
@@ -83,6 +83,19 @@
             </div>
         </div>
 
+        @if (!string.IsNullOrWhiteSpace(selectedCompanyFilter))
+        {
+            <div class="alert alert-light border mb-3 d-flex align-items-center justify-content-between">
+                <div>
+                    <i class="bi bi-funnel-fill me-2 text-primary"></i>
+                    <strong>Filtro activo:</strong> @selectedCompanyFilter
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearCompanyFilter">
+                    <i class="bi bi-x-lg me-1"></i>Quitar filtro
+                </button>
+            </div>
+        }
+
         <!-- Tabla de operaciones editable -->
         <div class="card shadow-sm">
             <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
@@ -95,11 +108,38 @@
                         <thead class="table-light">
                             <tr>
                                 <th scope="col" style="width: 50px;" class="text-center">#</th>
-                                <th scope="col" style="width: 250px;">Empresa</th>
+                                <th scope="col" style="width: 250px;">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span>Empresa</span>
+                                        <div class="dropdown">
+                                            <button type="button"
+                                                    class="btn btn-link btn-sm p-0 text-dark"
+                                                    @onclick="ToggleCompanyFilterMenu"
+                                                    title="Filtrar por empresa">
+                                                <i class="bi bi-chevron-down"></i>
+                                            </button>
+                                            @if (isCompanyFilterMenuOpen)
+                                            {
+                                                <div class="dropdown-menu show shadow-sm border" style="position: absolute; left: 0; top: 100%; min-width: 220px; z-index: 1050;">
+                                                    <button type="button" class="dropdown-item @(string.IsNullOrWhiteSpace(selectedCompanyFilter) ? "active" : "")" @onclick="ClearCompanyFilter">
+                                                        Todas las empresas
+                                                    </button>
+                                                    @foreach (var company in companies.OrderBy(c => c.Name))
+                                                    {
+                                                        <button type="button" class="dropdown-item @(selectedCompanyFilter == company.Name ? "active" : "")" @onclick="() => ApplyCompanyFilter(company.Name)">
+                                                            @company.Name
+                                                        </button>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+                                </th>
                                 <th scope="col" style="width: 150px;">Tipo</th>
                                 <th scope="col" style="width: 150px;" class="text-center">Fecha Apertura</th>
                                 <th scope="col" style="width: 150px;" class="text-center">Fecha Cierre</th>
                                 <th scope="col" style="width: 130px;" class="text-end">Precio/Acción</th>
+                                <th scope="col" style="width: 130px;" class="text-end">Precio en Vivo</th>
                                 <th scope="col" style="width: 110px;" class="text-end">Nº Acciones</th>
                                 <th scope="col" style="width: 110px;" class="text-end">Comisiones</th>
                                 <th scope="col" style="width: 130px;" class="text-end">Importe Total</th>
@@ -108,7 +148,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var operation in operations)
+                            @foreach (var operation in filteredOperations)
                             {
                                 @if (editingOperationId == operation.Id)
                                 {
@@ -118,13 +158,17 @@
                                             <span class="badge bg-warning text-dark">@operation.Id</span>
                                         </td>
                                         <td>
-                                            <select class="form-select form-select-sm" @bind="editOperation.CompanyName">
+                                            <select class="form-select form-select-sm" @bind="editOperation.CompanyName" @bind:after="OnCompanySelected">
                                                 <option value="">-- Seleccionar empresa --</option>
                                                 @foreach (var company in companies)
                                                 {
                                                     <option value="@company.Name">@company.Name</option>
                                                 }
                                             </select>
+                                            @if (isRefreshingSelectedCompanyLivePrice)
+                                            {
+                                                <small class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Actualizando precio en vivo...</small>
+                                            }
                                         </td>
                                         <td>
                                             <select class="form-select form-select-sm" @bind="editOperation.Type">
@@ -148,6 +192,16 @@
                                                    @bind="editPricePerShare"
                                                    @bind:event="oninput"
                                                    @onchange="OnPricePerShareChanged"
+                                                   step="0.01"
+                                                   min="0"
+                                                   inputmode="decimal"
+                                                   placeholder="0.00" />
+                                        </td>
+                                        <td>
+                                            <input type="number"
+                                                   class="form-control form-control-sm text-end"
+                                                   @bind="editLivePrice"
+                                                   @bind:event="oninput"
                                                    step="0.01"
                                                    min="0"
                                                    inputmode="decimal"
@@ -242,6 +296,17 @@
                                             }
                                         </td>
                                         <td class="text-end align-middle">@operation.PricePerShare.ToString("N4")</td>
+                                        <td class="text-end align-middle">
+                                            @{ var livePrice = GetLivePrice(operation.CompanyName); }
+                                            @if (livePrice.HasValue)
+                                            {
+                                                <span class="text-info">@livePrice.Value.ToString("C2")</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">N/D</span>
+                                            }
+                                        </td>
                                         <td class="text-end align-middle">@operation.NumberOfShares.ToString("N4")</td>
                                         <td class="text-end align-middle">@operation.Commission.ToString("C2")</td>
                                         <td class="text-end align-middle">
@@ -289,7 +354,7 @@
             <div class="card-footer text-muted">
                 <small>
                     <i class="bi bi-info-circle me-1"></i>
-                    Mostrando @operations.Count operación(es) | 
+                    Mostrando @filteredOperations.Count operación(es) | 
                     @if (editingOperationId.HasValue)
                     {
                         <span class="text-warning"><strong>Editando operación...</strong></span>
@@ -367,6 +432,10 @@
     // Empresas disponibles
     private List<CompanyDetail> companies = new();
 
+    // Filtro por empresa
+    private string? selectedCompanyFilter;
+    private bool isCompanyFilterMenuOpen;
+
     // Estados del componente
     private bool isLoading = true;
     private bool isSaving = false;
@@ -381,18 +450,25 @@
 
     // Campos desglosados del importe
     private decimal editPricePerShare = 0;
+    private decimal editLivePrice = 0;
     private int editNumberOfShares = 0;
     private decimal editCommission = 0;
     private decimal editCalculatedAmount = 0;
     private bool amountManuallyEdited = false;
+    private bool isRefreshingSelectedCompanyLivePrice = false;
 
     // Eliminación
     private Operation? operationToDelete = null;
 
     // Métricas calculadas
-    private int openOperationsCount => operations?.Count(o => !o.IsClosed) ?? 0;
-    private int closedOperationsCount => operations?.Count(o => o.IsClosed) ?? 0;
-    private decimal totalAmount => operations?.Sum(o => o.Amount) ?? 0;
+    private List<Operation> filteredOperations =>
+        string.IsNullOrWhiteSpace(selectedCompanyFilter)
+            ? operations ?? new List<Operation>()
+            : (operations ?? new List<Operation>()).Where(o => o.CompanyName == selectedCompanyFilter).ToList();
+
+    private int openOperationsCount => filteredOperations.Count(o => !o.IsClosed);
+    private int closedOperationsCount => filteredOperations.Count(o => o.IsClosed);
+    private decimal totalAmount => filteredOperations.Sum(o => o.Amount);
 
     protected override async Task OnInitializedAsync()
     {
@@ -614,6 +690,23 @@
         }
     }
 
+    private void ToggleCompanyFilterMenu()
+    {
+        isCompanyFilterMenuOpen = !isCompanyFilterMenuOpen;
+    }
+
+    private void ApplyCompanyFilter(string companyName)
+    {
+        selectedCompanyFilter = companyName;
+        isCompanyFilterMenuOpen = false;
+    }
+
+    private void ClearCompanyFilter()
+    {
+        selectedCompanyFilter = null;
+        isCompanyFilterMenuOpen = false;
+    }
+
     private void RecalculateAmountSimple()
     {
         if (!amountManuallyEdited)
@@ -655,6 +748,48 @@
         }
     }
 
+    /// <summary>
+    /// Se dispara al seleccionar una empresa en el formulario de operación (alta o edición).
+    /// Fuerza la recuperación del precio en vivo de dicha empresa.
+    /// </summary>
+    private async Task OnCompanySelected()
+    {
+        var company = companies.FirstOrDefault(c => c.Name == editOperation.CompanyName);
+        if (company == null)
+        {
+            return;
+        }
+
+        try
+        {
+            isRefreshingSelectedCompanyLivePrice = true;
+            await InvokeAsync(StateHasChanged);
+
+            await CompanyService.RefreshLivePriceAsync(company.Id);
+            var refreshed = await CompanyService.GetByIdAsync(company.Id);
+            if (refreshed != null)
+            {
+                company.LivePrice = refreshed.LivePrice;
+                company.LivePriceUpdatedAt = refreshed.LivePriceUpdatedAt;
+                company.LivePriceError = refreshed.LivePriceError;
+
+                if (refreshed.LivePrice.HasValue)
+                {
+                    editLivePrice = refreshed.LivePrice.Value;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al actualizar precio en vivo de la empresa seleccionada: {ex.Message}");
+        }
+        finally
+        {
+            isRefreshingSelectedCompanyLivePrice = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private string GetTypeBadgeClass(string type)
     {
         return type?.ToLower() switch
@@ -665,5 +800,14 @@
             "traspaso" => "bg-warning text-dark",
             _ => "bg-primary"
         };
+    }
+
+    /// <summary>
+    /// Resuelve el precio en vivo de una empresa a partir de los datos ya cargados en memoria,
+    /// sin necesidad de una nueva llamada a la API de Yahoo Finance.
+    /// </summary>
+    private decimal? GetLivePrice(string companyName)
+    {
+        return companies.FirstOrDefault(c => c.Name == companyName)?.LivePrice;
     }
 }

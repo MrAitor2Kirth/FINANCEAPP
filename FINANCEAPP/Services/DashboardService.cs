@@ -38,17 +38,26 @@ namespace FINANCEAPP.Services
             {
                 // Obtener totales de cada categoría
                 var companiesTotal = (await _companyService.GetAllAsync()).Sum(c => c.TotalInvestedValue);
+                var companiesInitialTotal = (await _companyService.GetAllAsync()).Sum(c => c.TotalInvestedInitial);
                 var fundsTotal = await _fundService.GetTotalCurrentValueAsync();
+                var fundsInitialTotal = await _fundService.GetTotalInvestedAsync();
                 var bankTotal = await _bankService.GetTotalBalanceAsync();
-                var safeHavenTotal = await _safeHavenService.GetTotalInvestedAsync();
-                var realEstateTotal = await _propertyService.GetTotalInvestedInActivePropertiesAsync();
+                // Total invertido (inicial) y valor actual, con el mismo criterio que acciones y fondos
+                var safeHavenInitialTotal = await _safeHavenService.GetTotalInvestedAsync();
+                var safeHavenTotal = await _safeHavenService.GetTotalCurrentValueAsync();
+                // Inmuebles no vendidos: valor actual si está informado; si no, total invertido
+                var realEstateTotal = (await _propertyService.GetActivePropertiesAsync())
+                    .Sum(p => p.CurrentValue ?? p.TotalInvested);
 
                 var summary = new DashboardSummary
                 {
                     AccionesTotal = companiesTotal,
+                    AccionesInitialTotal = companiesInitialTotal,
                     FundsTotal = fundsTotal,
+                    FundsInitialTotal = fundsInitialTotal,
                     BankTotal = bankTotal,
                     SafeHavenTotal = safeHavenTotal,
+                    SafeHavenInitialTotal = safeHavenInitialTotal,
                     RealEstateTotal = realEstateTotal,
                     TotalPatrimony = companiesTotal + fundsTotal + bankTotal + safeHavenTotal + realEstateTotal,
 
@@ -93,7 +102,7 @@ namespace FINANCEAPP.Services
 
                 // Acciones
                 var companies = await _companyService.GetAllAsync();
-                result["Acciones"] = companies.Sum(c => c.TotalInvestedInitial);
+                result["Acciones"] = companies.Sum(c => c.TotalInvestedValue);
 
                 // Fondos
                 var funds = await _fundService.GetAllFundsAsync();
@@ -103,11 +112,11 @@ namespace FINANCEAPP.Services
                 result["Banco"] = await _bankService.GetTotalBalanceAsync();
 
                 // Activos Refugio
-                result["Activos Refugio"] = await _safeHavenService.GetTotalInvestedAsync();
+                result["Activos Refugio"] = await _safeHavenService.GetTotalCurrentValueAsync();
 
                 // Inmobiliario
                 var activeProperties = await _propertyService.GetActivePropertiesAsync();
-                result["Inmobiliario"] = activeProperties.Sum(p => p.TotalInvested);
+                result["Inmobiliario"] = activeProperties.Sum(p => p.CurrentValue ?? p.TotalInvested);
 
                 _logger.LogInformation("Patrimonio por clase de activo obtenido");
                 return result;
@@ -133,8 +142,8 @@ namespace FINANCEAPP.Services
                 // Acciones
                 var companies = await _companyService.GetAllAsync();
                 var companiesTotalInvested = companies.Sum(c => c.TotalInvestedInitial);
-                // Para acciones aproximamos el valor actual (en una app real tendríamos CurrentPrice * shares)
-                var companiesTotalValue = companiesTotalInvested;
+                // Valor actual de las acciones: precio en vivo (o precio actual) x acciones en cartera
+                var companiesTotalValue = companies.Sum(c => c.TotalInvestedValue);
 
                 // Agregados
                 performance.TotalInvested = fundsTotalInvested + companiesTotalInvested;

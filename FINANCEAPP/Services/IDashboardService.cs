@@ -50,9 +50,12 @@ namespace FINANCEAPP.Services
     {
         public decimal TotalPatrimony { get; set; }
         public decimal AccionesTotal { get; set; }
+        public decimal AccionesInitialTotal { get; set; }
         public decimal FundsTotal { get; set; }
+        public decimal FundsInitialTotal { get; set; }
         public decimal BankTotal { get; set; }
         public decimal SafeHavenTotal { get; set; }
+        public decimal SafeHavenInitialTotal { get; set; }
         public decimal RealEstateTotal { get; set; }
 
         public int CompaniesCount { get; set; }

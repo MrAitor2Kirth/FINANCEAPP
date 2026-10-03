@@ -169,7 +169,7 @@ namespace FINANCEAPP.Services
             }
         }
 
-        public async Task<Property> SellPropertyAsync(int propertyId, decimal salePrice, string notes = "")
+        public async Task<Property> SellPropertyAsync(int propertyId, decimal salePrice, string notes = "", DateTime? saleDate = null)
         {
             try
             {
@@ -197,7 +197,7 @@ namespace FINANCEAPP.Services
                             Category = "Ingreso",
                             Type = "Venta",
                             Amount = salePrice,
-                            Date = DateTime.Now,
+                            Date = saleDate ?? DateTime.Now,
                             Description = notes != "" ? $"Venta de propiedad. {notes}" : "Venta de propiedad",
                             CreatedAt = DateTime.Now
                         };
@@ -211,7 +211,7 @@ namespace FINANCEAPP.Services
 
                         // 4. Actualizar la propiedad
                         property.Status = "Vendida";
-                        property.SaleDate = DateTime.Now;
+                        property.SaleDate = saleDate ?? DateTime.Now;
                         property.CurrentValue = salePrice;
                         property.TotalIncome = totalIncome;
                         property.TotalInvested = totalInvested;
@@ -352,41 +352,28 @@ namespace FINANCEAPP.Services
         {
             try
             {
-                using (var transaction = await _context.Database.BeginTransactionAsync())
+                // Nota: este método se invoca desde dentro de transacciones ya abiertas
+                // (p.ej. CreateOperationAsync/UpdateOperationAsync/DeleteOperationAsync).
+                // SQLite no soporta transacciones anidadas, así que aquí NO se abre una nueva.
+                var property = await GetPropertyByNameAsync(propertyName);
+                if (property == null)
                 {
-                    try
-                    {
-                        // 1. Obtener la propiedad
-                        var property = await GetPropertyByNameAsync(propertyName);
-                        if (property == null)
-                        {
-                            throw new InvalidOperationException($"No existe propiedad llamada '{propertyName}'");
-                        }
-
-                        // 2. Calcular totales desde operaciones
-                        var totalIncome = await GetTotalIncomeAsync(propertyName);
-                        var totalExpenses = await GetTotalExpensesAsync(propertyName);
-
-                        // 3. TotalInvested = PurchasePrice + Gastos en reformas/mantenimiento
-                        decimal totalInvested = property.PurchasePrice + Math.Abs(totalExpenses);
-
-                        // 4. Actualizar
-                        property.TotalIncome = totalIncome;
-                        property.TotalInvested = totalInvested;
-                        property.UpdatedAt = DateTime.Now;
-
-                        _context.Properties.Update(property);
-                        await _context.SaveChangesAsync();
-                        await transaction.CommitAsync();
-
-                        _logger.LogInformation($"Totales de '{propertyName}' recalculados - Ingresos: {totalIncome}, Inversión: {totalInvested}");
-                    }
-                    catch (Exception ex)
-                    {
-                        await transaction.RollbackAsync();
-                        throw;
-                    }
+                    throw new InvalidOperationException($"No existe propiedad llamada '{propertyName}'");
                 }
+
+                var totalIncome = await GetTotalIncomeAsync(propertyName);
+                var totalExpenses = await GetTotalExpensesAsync(propertyName);
+
+                decimal totalInvested = property.PurchasePrice + Math.Abs(totalExpenses);
+
+                property.TotalIncome = totalIncome;
+                property.TotalInvested = totalInvested;
+                property.UpdatedAt = DateTime.Now;
+
+                _context.Properties.Update(property);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation($"Totales de '{propertyName}' recalculados - Ingresos: {totalIncome}, Inversión: {totalInvested}");
             }
             catch (Exception ex)
             {

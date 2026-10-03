@@ -1,87 +1,55 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">💰 FINANCEAPP</a>
-    </div>
+﻿<div class="brand-row">
+    <a class="brand" href="">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">FINANCEAPP</span>
+    </a>
 </div>
 
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+<input type="checkbox" title="Menú de navegación" class="navbar-toggler" />
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <!-- Home -->
-        <div class="nav-item px-3">
+    <nav class="nav flex-column" aria-label="Principal">
+        <div class="nav-item">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="oi oi-home" aria-hidden="true"></span> Home
+                <i class="bi bi-house" aria-hidden="true"></i> Inicio
             </NavLink>
         </div>
-
-        <!-- Dashboard -->
-        <div class="nav-item px-3">
+        <div class="nav-item">
             <NavLink class="nav-link" href="dashboard">
-                <span class="oi oi-graph" aria-hidden="true"></span> Dashboard
+                <i class="bi bi-speedometer2" aria-hidden="true"></i> Dashboard
             </NavLink>
         </div>
-
-        <!-- Inversiones -->
-        <div class="nav-item px-3">
-            <div class="nav-text" style="color: #999; padding-left: 0.5rem; margin-top: 10px; margin-bottom: 5px;">
-                <small><strong>INVERSIONES</strong></small>
-            </div>
-        </div>
-
-        <!-- Fondos de Inversión -->
-        <div class="nav-item px-3">
+        <p class="nav-section">Inversiones</p>
+        <div class="nav-item">
             <NavLink class="nav-link" href="fondos">
-                <span class="oi oi-briefcase" aria-hidden="true"></span> Fondos de Inversión
+                <i class="bi bi-briefcase" aria-hidden="true"></i> Fondos de Inversión
             </NavLink>
         </div>
-
-        <!-- Acciones / Empresas -->
-        <div class="nav-item px-3">
+        <div class="nav-item">
             <NavLink class="nav-link" href="companies">
-                <span class="oi oi-building" aria-hidden="true"></span> Empresas
+                <i class="bi bi-building" aria-hidden="true"></i> Empresas
             </NavLink>
         </div>
-
-        <!-- Activos Refugio -->
-        <div class="nav-item px-3">
+        <div class="nav-item">
             <NavLink class="nav-link" href="activos-refugio">
-                <span class="oi oi-shield" aria-hidden="true"></span> Activos Refugio
+                <i class="bi bi-shield-check" aria-hidden="true"></i> Activos Refugio
             </NavLink>
         </div>
-
-        <!-- Inmobiliario -->
-        <div class="nav-item px-3">
+        <div class="nav-item">
             <NavLink class="nav-link" href="inmuebles">
-                <span class="oi oi-home" aria-hidden="true"></span> Propiedades
+                <i class="bi bi-key" aria-hidden="true"></i> Propiedades
             </NavLink>
         </div>
-
-        <!-- Banco & Efectivo -->
-        <div class="nav-item px-3">
-            <div class="nav-text" style="color: #999; padding-left: 0.5rem; margin-top: 10px; margin-bottom: 5px;">
-                <small><strong>EFECTIVO</strong></small>
-            </div>
-        </div>
-
-        <!-- Cuentas Bancarias -->
-        <div class="nav-item px-3">
+        <p class="nav-section">Efectivo</p>
+        <div class="nav-item">
             <NavLink class="nav-link" href="banco">
-                <span class="oi oi-account-login" aria-hidden="true"></span> Cuentas Bancarias
+                <i class="bi bi-bank" aria-hidden="true"></i> Cuentas Bancarias
             </NavLink>
         </div>
-
-        <!-- Operaciones Legado -->
-        <div class="nav-item px-3">
-            <div class="nav-text" style="color: #999; padding-left: 0.5rem; margin-top: 10px; margin-bottom: 5px;">
-                <small><strong>LEGADO</strong></small>
-            </div>
-        </div>
-
-        <!-- Operaciones -->
-        <div class="nav-item px-3">
+        <p class="nav-section">Legado</p>
+        <div class="nav-item">
             <NavLink class="nav-link" href="operations">
-                <span class="oi oi-list" aria-hidden="true"></span> Operaciones Acciones
+                <i class="bi bi-list-ul" aria-hidden="true"></i> Operaciones Acciones
             </NavLink>
         </div>
     </nav>

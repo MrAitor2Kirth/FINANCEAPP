@@ -32,8 +32,17 @@ namespace FINANCEAPP.Models
         /// Total invertido actualmente en el activo
         /// Se calcula desde operaciones (Compras - Ventas)
         /// </summary>
+        [Display(Name = "Total Invertido")]
         [Column(TypeName = "decimal(18,2)")]
         public decimal TotalInvested { get; set; }
+
+        /// <summary>
+        /// Valor actual del activo
+        /// Se calcula desde operaciones (Compras - Ventas)
+        /// </summary>
+        [Display(Name = "Valor Actual")]
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal CurrentValue { get; set; }
 
         /// <summary>
         /// Fecha de creación del registro
