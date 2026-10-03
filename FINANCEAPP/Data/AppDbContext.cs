@@ -96,6 +96,12 @@ namespace FINANCEAPP.Data
         public DbSet<PriceHistoryPoint> PriceHistoryPoints { get; set; }
 
         /// <summary>
+        /// DbSet del histórico de ventas de acciones (beneficio generado por cada venta)
+        /// Representa la tabla SalesHistory en la base de datos
+        /// </summary>
+        public DbSet<SaleHistory> SalesHistory { get; set; }
+
+        /// <summary>
         /// Configuración del modelo de datos
         /// Establece índices, relaciones y constraints adicionales
         /// </summary>
@@ -860,6 +866,26 @@ namespace FINANCEAPP.Data
                     .WithMany()
                     .HasForeignKey(e => e.CompanyId)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // Configuración de la entidad SaleHistory (histórico de ventas de acciones)
+            modelBuilder.Entity<SaleHistory>(entity =>
+            {
+                entity.ToTable("SalesHistory");
+
+                // Índices por empresa y por fecha de venta
+                entity.HasIndex(e => e.CompanyName)
+                    .HasDatabaseName("IX_SalesHistory_CompanyName");
+
+                entity.HasIndex(e => e.SaleDate)
+                    .HasDatabaseName("IX_SalesHistory_SaleDate");
+
+                entity.Property(e => e.CompanyName)
+                    .IsRequired()
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.Ticker)
+                    .HasMaxLength(20);
             });
         }
     }

@@ -184,6 +184,7 @@ namespace FINANCEAPP
             builder.Services.AddScoped<IDashboardService, DashboardService>();
             builder.Services.AddHttpClient<IStockPriceService, StockPriceService>();
             builder.Services.AddScoped<IPriceHistoryService, PriceHistoryService>();
+            builder.Services.AddScoped<ISaleHistoryService, SaleHistoryService>();
 
             var app = builder.Build();
 
@@ -198,6 +199,7 @@ namespace FINANCEAPP
                 DatabaseSchemaUpgrader.EnsureCompanyDetailsColumns(context);
                 DatabaseSchemaUpgrader.EnsureCompanyDetailLivePriceColumns(context);
                 DatabaseSchemaUpgrader.EnsurePriceHistoryTable(context);
+                DatabaseSchemaUpgrader.EnsureSalesHistoryTable(context);
 
 #if DEBUG
                 var logger = scope.ServiceProvider.GetRequiredService<ILogger<AppDbContext>>();

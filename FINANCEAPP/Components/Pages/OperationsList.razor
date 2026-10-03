@@ -11,13 +11,17 @@
         <div class="col">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <h1 class="display-5 fw-bold text-primary">
+                    <h1 class="sw" style="--swatch:var(--indigo)">
                         <i class="bi bi-graph-up-arrow me-2"></i>
                         Operaciones Financieras
                     </h1>
                     <p class="lead text-muted">Gestión inline de operaciones de inversión</p>
                 </div>
-                <div>
+                <div class="d-flex gap-2">
+                    <a href="/sales-history" class="btn btn-outline-primary btn-lg">
+                        <i class="bi bi-clock-history me-2"></i>
+                        Histórico de ventas
+                    </a>
                     <button class="btn btn-success btn-lg" @onclick="AddNewOperation">
                         <i class="bi bi-plus-circle me-2"></i>
                         Nueva Operación
@@ -26,6 +30,16 @@
             </div>
         </div>
     </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger d-flex align-items-center justify-content-between" role="alert">
+            <div>
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>@errorMessage
+            </div>
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="ClearError"></button>
+        </div>
+    }
 
     @if (isLoading)
     {
@@ -48,38 +62,22 @@
     else
     {
         <!-- Tarjetas de resumen -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-3">
-                <div class="card border-primary shadow-sm">
-                    <div class="card-body">
-                        <h6 class="card-subtitle mb-2 text-muted">Total Operaciones</h6>
-                        <h3 class="card-title text-primary mb-0">@filteredOperations.Count</h3>
-                    </div>
-                </div>
+        <div class="stat-grid">
+            <div class="stat-card" style="--swatch:var(--indigo)">
+                <p class="stat-label">Total operaciones</p>
+                <p class="stat-value">@filteredOperations.Count</p>
             </div>
-            <div class="col-md-3">
-                <div class="card border-success shadow-sm">
-                    <div class="card-body">
-                        <h6 class="card-subtitle mb-2 text-muted">Operaciones Abiertas</h6>
-                        <h3 class="card-title text-success mb-0">@openOperationsCount</h3>
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--teal)">
+                <p class="stat-label">Operaciones abiertas</p>
+                <p class="stat-value">@openOperationsCount</p>
             </div>
-            <div class="col-md-3">
-                <div class="card border-secondary shadow-sm">
-                    <div class="card-body">
-                        <h6 class="card-subtitle mb-2 text-muted">Operaciones Cerradas</h6>
-                        <h3 class="card-title text-secondary mb-0">@closedOperationsCount</h3>
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--ink-soft)">
+                <p class="stat-label">Operaciones cerradas</p>
+                <p class="stat-value">@closedOperationsCount</p>
             </div>
-            <div class="col-md-3">
-                <div class="card border-info shadow-sm">
-                    <div class="card-body">
-                        <h6 class="card-subtitle mb-2 text-muted">Total Invertido</h6>
-                        <h3 class="card-title text-info mb-0">@totalAmount.ToString("C2")</h3>
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--amber)">
+                <p class="stat-label">Total invertido</p>
+                <p class="stat-value">@totalAmount.ToString("C2")</p>
             </div>
         </div>
 
@@ -171,7 +169,7 @@
                                             }
                                         </td>
                                         <td>
-                                            <select class="form-select form-select-sm" @bind="editOperation.Type">
+                                            <select class="form-select form-select-sm" @bind="editOperation.Type" @bind:after="OnTypeChanged">
                                                 <option value="Compra">Compra</option>
                                                 <option value="Venta">Venta</option>
                                                 <option value="Dividendo">Dividendo</option>
@@ -191,17 +189,23 @@
                                                    class="form-control form-control-sm text-end"
                                                    @bind="editPricePerShare"
                                                    @bind:event="oninput"
+                                                   @bind:after="RecalculateAmount"
                                                    @onchange="OnPricePerShareChanged"
                                                    step="0.01"
                                                    min="0"
                                                    inputmode="decimal"
                                                    placeholder="0.00" />
+                                            @if (OperationAmountCalculator.IsAutoCalculated(editOperation.Type) && editPricePerShare <= 0 && editLivePrice > 0)
+                                            {
+                                                <small class="text-muted d-block">Se usará el precio en vivo @editLivePrice.ToString("N2")</small>
+                                            }
                                         </td>
                                         <td>
                                             <input type="number"
                                                    class="form-control form-control-sm text-end"
                                                    @bind="editLivePrice"
                                                    @bind:event="oninput"
+                                                   @bind:after="RecalculateAmount"
                                                    step="0.01"
                                                    min="0"
                                                    inputmode="decimal"
@@ -211,7 +215,8 @@
                                             <input type="number"
                                                    class="form-control form-control-sm text-end"
                                                    @bind="editNumberOfShares"
-                                                   @bind:after="RecalculateAmountSimple"
+                                                   @bind:event="oninput"
+                                                   @bind:after="RecalculateAmount"
                                                    step="1"
                                                    placeholder="0" />
                                         </td>
@@ -219,7 +224,8 @@
                                             <input type="number"
                                                    class="form-control form-control-sm text-end"
                                                    @bind="editCommission"
-                                                   @bind:after="RecalculateAmountSimple"
+                                                   @bind:event="oninput"
+                                                   @bind:after="RecalculateAmount"
                                                    step="0.01"
                                                    min="0"
                                                    inputmode="decimal"
@@ -230,12 +236,15 @@
                                                    class="form-control form-control-sm text-end fw-bold text-primary"
                                                    @bind="editCalculatedAmount"
                                                    @bind:event="oninput"
-                                                   @bind:after="OnAmountChanged"
                                                    step="0.01"
                                                    min="0"
                                                    inputmode="decimal"
                                                    title="Puede introducir el importe manualmente"
                                                    placeholder="0.00" />
+                                            @if (OperationAmountCalculator.IsAutoCalculated(editOperation.Type))
+                                            {
+                                                <small class="text-muted d-block">Se recalcula al cambiar precio, acciones o comisión</small>
+                                            }
                                         </td>
                                         <td class="text-center align-middle">
                                             @if (editOperation.CloseDate.HasValue)
@@ -392,6 +401,13 @@
                         <strong>Importe:</strong> @operationToDelete.Amount.ToString("C2")<br/>
                         <strong>Fecha:</strong> @operationToDelete.Date.ToString("dd/MM/yyyy")
                     </div>
+                    @if (operationToDelete.Type == "Venta")
+                    {
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Las compras que se cerraron con esta venta <strong>no se reabrirán</strong> y el registro del histórico de ventas se conserva.
+                        </div>
+                    }
                     <p class="text-danger mb-0">
                         <i class="bi bi-exclamation-circle me-1"></i>
                         <strong>Esta acción no se puede deshacer.</strong>
@@ -454,11 +470,13 @@
     private int editNumberOfShares = 0;
     private decimal editCommission = 0;
     private decimal editCalculatedAmount = 0;
-    private bool amountManuallyEdited = false;
     private bool isRefreshingSelectedCompanyLivePrice = false;
 
     // Eliminación
     private Operation? operationToDelete = null;
+
+    // Mensaje de error visible en pantalla
+    private string? errorMessage;
 
     // Métricas calculadas
     private List<Operation> filteredOperations =>
@@ -499,6 +517,7 @@
     /// </summary>
     private void AddNewOperation()
     {
+        errorMessage = null;
         var newOperation = new Operation
         {
             Id = 0, // ID temporal para nueva operación
@@ -518,6 +537,7 @@
     /// </summary>
     private void StartEdit(Operation operation)
     {
+        errorMessage = null;
         editingOperationId = operation.Id;
         editOperation = new Operation
         {
@@ -536,9 +556,8 @@
         editNumberOfShares = operation.NumberOfShares;
         editCommission = operation.Commission;
         editCalculatedAmount = operation.Amount;
-        // Si la operación no tiene precio/acción o número de acciones (p.ej. Dividendo),
-        // se considera que el importe se informa manualmente.
-        amountManuallyEdited = operation.PricePerShare <= 0 || operation.NumberOfShares <= 0;
+        // El precio en vivo arranca con el de la empresa de la fila (si está cargado); el importe guardado no se recalcula
+        editLivePrice = companies.FirstOrDefault(c => c.Name == operation.CompanyName)?.LivePrice ?? 0m;
     }
 
     /// <summary>
@@ -560,7 +579,7 @@
         editNumberOfShares = 0;
         editCommission = 0;
         editCalculatedAmount = 0;
-        amountManuallyEdited = false;
+        editLivePrice = 0;
     }
 
     /// <summary>
@@ -571,37 +590,32 @@
         try
         {
             isSaving = true;
+            errorMessage = null;
 
             // Validaciones básicas
             if (string.IsNullOrWhiteSpace(editOperation.CompanyName))
             {
-                Console.WriteLine("Debe seleccionar una empresa");
+                errorMessage = "Debe seleccionar una empresa.";
                 return;
             }
 
-            if (amountManuallyEdited)
+            // Validación y reglas del importe (SPEC-02-02)
+            var validationError = OperationAmountCalculator.Validate(
+                editOperation.Type, editPricePerShare, editLivePrice, editNumberOfShares, editCalculatedAmount);
+            if (validationError != null)
             {
-                // El importe se informa directamente (p.ej. operaciones de Dividendo),
-                // no se exige precio/acción ni número de acciones.
-                if (editCalculatedAmount <= 0)
-                {
-                    Console.WriteLine("El importe total debe ser mayor que 0");
-                    return;
-                }
-            }
-            else if (editPricePerShare <= 0 || editNumberOfShares <= 0)
-            {
-                Console.WriteLine("El precio por acción y el número de acciones deben ser mayores que 0");
+                errorMessage = validationError;
                 return;
             }
 
-            // Calcular importe final: si el usuario lo ha editado manualmente, se respeta su valor
-            editOperation.PricePerShare = editPricePerShare;
+            // En Compra y Venta se guarda el precio base (si solo había precio en vivo, se copia al precio por acción)
+            var basePrice = OperationAmountCalculator.ResolveBasePrice(editPricePerShare, editLivePrice);
+            editOperation.PricePerShare = OperationAmountCalculator.IsAutoCalculated(editOperation.Type) && basePrice.HasValue
+                ? basePrice.Value
+                : editPricePerShare;
             editOperation.NumberOfShares = editNumberOfShares;
             editOperation.Commission = editCommission;
-            editOperation.Amount = amountManuallyEdited
-                ? Math.Round(editCalculatedAmount, 2)
-                : Math.Round(editPricePerShare * editNumberOfShares + editCommission, 2);
+            editOperation.Amount = Math.Round(editCalculatedAmount, 2);
 
             // Asignar fechas desde los campos de edición
             editOperation.Date = editOperationDate;
@@ -609,8 +623,23 @@
 
             if (operationId == 0)
             {
-                // Nueva operación
-                var savedOperation = await OperationService.AddAsync(editOperation);
+                if (editOperation.Type == "Venta")
+                {
+                    // La venta cierra compras por FIFO y se guarda en el histórico.
+                    // Precio de venta: manda el precio por acción si está informado; si no, el precio en vivo.
+                    var sellPrice = basePrice ?? editPricePerShare;
+                    var result = await OperationService.RegisterSaleAsync(editOperation, sellPrice);
+                    if (!result.Success)
+                    {
+                        errorMessage = result.ErrorMessage;
+                        return; // se mantiene el modo edición para poder corregir
+                    }
+                }
+                else
+                {
+                    await OperationService.AddAsync(editOperation);
+                }
+
                 // Recargar la lista completa
                 await LoadOperations();
             }
@@ -636,6 +665,7 @@
         catch (Exception ex)
         {
             Console.WriteLine($"Error al guardar operación: {ex.Message}");
+            errorMessage = "No se pudo guardar la operación. No se ha modificado ningún dato.";
         }
         finally
         {
@@ -690,6 +720,11 @@
         }
     }
 
+    private void ClearError()
+    {
+        errorMessage = null;
+    }
+
     private void ToggleCompanyFilterMenu()
     {
         isCompanyFilterMenuOpen = !isCompanyFilterMenuOpen;
@@ -707,22 +742,33 @@
         isCompanyFilterMenuOpen = false;
     }
 
-    private void RecalculateAmountSimple()
+    /// <summary>
+    /// Recalcula el importe con la regla de OperationAmountCalculator (solo Compra y Venta).
+    /// Si no hay datos suficientes, el importe actual se mantiene.
+    /// </summary>
+    private void RecalculateAmount()
     {
-        if (!amountManuallyEdited)
+        if (!OperationAmountCalculator.IsAutoCalculated(editOperation.Type))
         {
-            editCalculatedAmount = Math.Round(editPricePerShare * editNumberOfShares + editCommission, 2);
+            return;
+        }
+
+        var amount = OperationAmountCalculator.Calculate(editPricePerShare, editLivePrice, editNumberOfShares, editCommission);
+        if (amount.HasValue)
+        {
+            editCalculatedAmount = amount.Value;
         }
     }
 
     /// <summary>
-    /// Se dispara cuando el usuario edita manualmente el importe total.
-    /// A partir de ese momento, el importe deja de recalcularse automáticamente
-    /// hasta que se reinicie la edición de la operación.
+    /// Al cambiar el tipo solo se recalcula si el importe está vacío o a 0.
     /// </summary>
-    private void OnAmountChanged()
+    private void OnTypeChanged()
     {
-        amountManuallyEdited = true;
+        if (editCalculatedAmount <= 0)
+        {
+            RecalculateAmount();
+        }
     }
 
     private async Task OnPricePerShareChanged(ChangeEventArgs e)
@@ -732,10 +778,7 @@
             decimal.TryParse(rawValue, NumberStyles.Any, CultureInfo.CurrentCulture, out price))
         {
             editPricePerShare = Math.Round(price, 2);
-            if (!amountManuallyEdited)
-            {
-                editCalculatedAmount = Math.Round(editPricePerShare * editNumberOfShares + editCommission, 2);
-            }
+            RecalculateAmount();
 
             // Actualizar precio actual de la empresa seleccionada
             if (!string.IsNullOrWhiteSpace(editOperation.CompanyName))
@@ -754,6 +797,9 @@
     /// </summary>
     private async Task OnCompanySelected()
     {
+        // No se arrastra el precio en vivo de la empresa anterior
+        editLivePrice = 0;
+
         var company = companies.FirstOrDefault(c => c.Name == editOperation.CompanyName);
         if (company == null)
         {
@@ -776,6 +822,7 @@
                 if (refreshed.LivePrice.HasValue)
                 {
                     editLivePrice = refreshed.LivePrice.Value;
+                    RecalculateAmount();
                 }
             }
         }

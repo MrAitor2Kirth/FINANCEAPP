@@ -116,6 +116,54 @@ namespace FINANCEAPP.Data
             }
         }
 
+        /// <summary>
+        /// Crea la tabla SalesHistory si no existe todavía (histórico de ventas de acciones).
+        /// No modifica ni borra datos existentes.
+        /// </summary>
+        public static void EnsureSalesHistoryTable(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""SalesHistory"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_SalesHistory"" PRIMARY KEY AUTOINCREMENT,
+                        ""OperationId"" INTEGER NOT NULL,
+                        ""CompanyName"" TEXT NOT NULL,
+                        ""Ticker"" TEXT NOT NULL,
+                        ""SaleDate"" TEXT NOT NULL,
+                        ""NumberOfShares"" INTEGER NOT NULL,
+                        ""AverageBuyPrice"" decimal(18,4) NOT NULL,
+                        ""SellPrice"" decimal(18,2) NOT NULL,
+                        ""Amount"" decimal(18,2) NOT NULL,
+                        ""Commission"" decimal(18,2) NOT NULL,
+                        ""Profit"" decimal(18,2) NOT NULL,
+                        ""CreatedAt"" TEXT NOT NULL,
+                        ""UpdatedAt"" TEXT NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS ""IX_SalesHistory_CompanyName"" ON ""SalesHistory"" (""CompanyName"");
+                    CREATE INDEX IF NOT EXISTS ""IX_SalesHistory_SaleDate"" ON ""SalesHistory"" (""SaleDate"");
+                ";
+                command.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
         private static HashSet<string> GetExistingColumns(System.Data.Common.DbConnection connection, string tableName)
         {
             var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

@@ -55,6 +55,16 @@ namespace FINANCEAPP.Services
         Task<Operation> AddAsync(Operation operation);
 
         /// <summary>
+        /// Registra una Venta de acciones: cierra por FIFO las compras abiertas de la empresa
+        /// (dividiendo la última si se cierra solo en parte), cierra la propia Venta y guarda
+        /// el registro en el histórico de ventas. Todo en una transacción.
+        /// </summary>
+        /// <param name="sale">Operación de tipo Venta (precio por acción y acciones mayores que 0)</param>
+        /// <param name="sellPrice">Precio de venta por acción para el histórico</param>
+        /// <returns>Resultado con éxito, mensaje de error e Id del registro de histórico</returns>
+        Task<SaleRegistrationResult> RegisterSaleAsync(Operation sale, decimal sellPrice);
+
+        /// <summary>
         /// Actualiza una operación existente
         /// </summary>
         /// <param name="operation">Operación con los datos actualizados</param>
@@ -79,5 +89,32 @@ namespace FINANCEAPP.Services
         /// </summary>
         /// <returns>Diccionario con el tipo y cantidad de operaciones</returns>
         Task<Dictionary<string, int>> GetOperationCountByTypeAsync();
+    }
+}
+
+namespace FINANCEAPP.Services
+{
+    /// <summary>
+    /// Resultado de registrar una Venta con <see cref="IOperationService.RegisterSaleAsync"/>
+    /// </summary>
+    public class SaleRegistrationResult
+    {
+        /// <summary>
+        /// Indica si la venta se registró correctamente
+        /// </summary>
+        public bool Success { get; set; }
+
+        /// <summary>
+        /// Mensaje de error en español cuando Success es false
+        /// </summary>
+        public string ErrorMessage { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Id del registro creado en el histórico de ventas (0 si hubo error)
+        /// </summary>
+        public int SaleHistoryId { get; set; }
+
+        public static SaleRegistrationResult Fail(string message) =>
+            new() { Success = false, ErrorMessage = message };
     }
 }

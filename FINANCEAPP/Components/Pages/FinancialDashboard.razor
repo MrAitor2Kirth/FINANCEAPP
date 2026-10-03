@@ -20,10 +20,8 @@
     }
     else if (summary != null)
     {
-        @{
-            var shares = BuildShares();
-            var shareBase = shares.Sum(x => Math.Max(x.Value, 0m));
-        }
+        var shares = BuildShares();
+        var shareBase = shares.Sum(x => Math.Max(x.Value, 0m));
 
         <div class="page-head">
             <div>
@@ -270,11 +268,11 @@
 
     private List<ClassShare> BuildShares() => summary is null ? new List<ClassShare>() : new List<ClassShare>
     {
-        new ClassShare("Acciones", "#14213D", summary.AccionesTotal, summary.AccionesInitialTotal, $"{summary.CompaniesCount} empresas"),
-        new ClassShare("Fondos de inversión", "#4F6D8F", summary.FundsTotal, summary.FundsInitialTotal, $"{summary.FundsCount} fondos"),
-        new ClassShare("Activos refugio", "#B8893B", summary.SafeHavenTotal, summary.SafeHavenInitialTotal, $"{summary.SafeHavenAssetsCount} activos"),
-        new ClassShare("Inmuebles", "#6B8F86", summary.RealEstateTotal, null, $"{summary.PropertiesCount} propiedades"),
-        new ClassShare("Efectivo bancario", "#B9C3D0", summary.BankTotal, null, $"{summary.BankAccountsCount} cuentas")
+        new ClassShare("Acciones", "#3F3B9B", summary.AccionesTotal, summary.AccionesInitialTotal, $"{summary.CompaniesCount} empresas"),
+        new ClassShare("Fondos de inversión", "#1F8A93", summary.FundsTotal, summary.FundsInitialTotal, $"{summary.FundsCount} fondos"),
+        new ClassShare("Activos refugio", "#E0A030", summary.SafeHavenTotal, summary.SafeHavenInitialTotal, $"{summary.SafeHavenAssetsCount} activos"),
+        new ClassShare("Inmuebles", "#9A4F8C", summary.RealEstateTotal, null, $"{summary.PropertiesCount} propiedades"),
+        new ClassShare("Efectivo bancario", "#7FB08F", summary.BankTotal, null, $"{summary.BankAccountsCount} cuentas")
     };
 
     // Proporcion de cada clase sobre la suma de las clases (solo valores positivos), para la banda y el porcentaje.

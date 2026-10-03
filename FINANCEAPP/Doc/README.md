@@ -102,7 +102,7 @@ FINANCEAPP/                          ← raíz del repositorio
 │   │   └── Routes.razor             Enrutado
 │   ├── doc/                         Documentación del proyecto (este directorio)
 │   │   ├── README.md
-│   │   └── specs/                   Especificaciones detalladas (spec01…spec20)
+│   │   └── specs/                   Especificaciones detalladas (specs/specNN/specNN.md) y features
 │   ├── Data/
 │   │   ├── AppDbContext.cs          DbContext de EF Core
 │   │   └── DatabaseSchemaUpgrader.cs  Migraciones ligeras sin pérdida de datos
@@ -205,5 +205,7 @@ Requisitos: Visual Studio con la carga de trabajo **.NET MAUI** y el SDK de **.N
 | Documento | Contenido |
 |---|---|
 | `FINANCEAPP/doc/README.md` | Este documento: visión general, estructura funcional y técnica |
+| `FINANCEAPP/doc/constitution.md` | Los seis principios innegociables del proyecto |
 | `FINANCEAPP/doc/specs/README.md` | Índice de las 20 especificaciones funcionales, agrupadas en 7 categorías |
-| `FINANCEAPP/doc/specs/spec01…spec20` | Una especificación detallada por funcionalidad |
+| `FINANCEAPP/doc/specs/specNN/specNN.md` | Una especificación detallada por funcionalidad, cada una en su carpeta |
+| `FINANCEAPP/doc/specs/specNN/specNN-MM-<name>/` | Features de esa spec: `specNN-MM.md`, `planNN-MM.md` y `taskNN-MM.md` |

@@ -11,7 +11,7 @@
 <div class="container-fluid mt-4">
     <div class="row mb-4">
         <div class="col-12">
-            <h1>Gestión de Fondos de Inversión</h1>
+            <h1 class="sw" style="--swatch:var(--teal)">Gestión de Fondos de Inversión</h1>
             <p class="text-muted">Administra tus fondos de inversión y realiza un seguimiento de sus operaciones</p>
         </div>
     </div>
@@ -25,7 +25,7 @@
     else if (funds == null || funds.Count == 0)
     {
         <div class="alert alert-warning">
-            <span class="oi oi-warning"></span> No hay fondos registrados
+            <i class="bi bi-exclamation-triangle me-1" aria-hidden="true"></i> No hay fondos registrados
             <button class="btn btn-primary ms-3" @onclick="NavigateToNew">
                 Crear primer fondo
             </button>
@@ -36,7 +36,7 @@
         <div class="row mb-3">
             <div class="col-12">
                 <button class="btn btn-primary" @onclick="NavigateToNew">
-                    <span class="oi oi-plus"></span> Nuevo Fondo
+                    <i class="bi bi-plus-lg me-1" aria-hidden="true"></i> Nuevo Fondo
                 </button>
             </div>
         </div>
@@ -83,13 +83,13 @@
                             </td>
                             <td>
                                 <button class="btn btn-sm btn-outline-primary" @onclick="() => NavigateToDetail(fund.Name)">
-                                    <span class="oi oi-eye"></span>
+                                    <i class="bi bi-eye" aria-hidden="true"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-secondary" @onclick="() => NavigateToEdit(fund.Id)">
-                                    <span class="oi oi-pencil"></span>
+                                    <i class="bi bi-pencil" aria-hidden="true"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteFund(fund.Id)">
-                                    <span class="oi oi-trash"></span>
+                                    <i class="bi bi-trash" aria-hidden="true"></i>
                                 </button>
                             </td>
                         </tr>

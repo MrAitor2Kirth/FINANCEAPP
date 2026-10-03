@@ -105,6 +105,180 @@ namespace FINANCEAPP.Services
         }
 
         /// <summary>
+        /// Registra una Venta de acciones cerrando por FIFO las compras abiertas y guardando el histórico
+        /// </summary>
+        public async Task<SaleRegistrationResult> RegisterSaleAsync(Operation sale, decimal sellPrice)
+        {
+            // 1. Validación
+            if (!string.Equals(sale.Type, "Venta", StringComparison.Ordinal))
+            {
+                return SaleRegistrationResult.Fail("La operación debe ser de tipo Venta.");
+            }
+
+            if (string.IsNullOrWhiteSpace(sale.CompanyName))
+            {
+                return SaleRegistrationResult.Fail("El nombre de la empresa es obligatorio.");
+            }
+
+            if (sale.NumberOfShares <= 0)
+            {
+                return SaleRegistrationResult.Fail("El número de acciones de la venta debe ser mayor que 0.");
+            }
+
+            if (sale.PricePerShare <= 0)
+            {
+                return SaleRegistrationResult.Fail("El precio por acción de la venta debe ser mayor que 0.");
+            }
+
+            if (sellPrice <= 0)
+            {
+                return SaleRegistrationResult.Fail("El precio de venta debe ser mayor que 0.");
+            }
+
+            var company = await _context.CompanyDetails.FirstOrDefaultAsync(c => c.Name == sale.CompanyName);
+            if (company == null)
+            {
+                return SaleRegistrationResult.Fail($"La empresa «{sale.CompanyName}» no existe.");
+            }
+
+            // 2. Transacción (SQLite no admite transacciones anidadas: el recálculo se llama dentro de esta)
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                // 3. Compras abiertas por FIFO (fecha e Id)
+                var openOperations = await _context.Operations
+                    .Where(o => o.CompanyName == sale.CompanyName && o.CloseDate == null)
+                    .ToListAsync();
+
+                var lots = openOperations
+                    .Where(o => o.Type == "Compra" || o.Type == "Traspaso")
+                    .OrderBy(o => o.Date)
+                    .ThenBy(o => o.Id)
+                    .ToList();
+
+                // Las ventas antiguas que siguen abiertas ya restan acciones en la empresa
+                var legacyOpenSoldShares = openOperations
+                    .Where(o => o.Type == "Venta")
+                    .Sum(o => o.NumberOfShares);
+
+                var availableShares = lots.Sum(o => o.NumberOfShares) - legacyOpenSoldShares;
+
+                // 4. Acciones insuficientes: no se cambia nada
+                if (availableShares < sale.NumberOfShares)
+                {
+                    await transaction.RollbackAsync();
+                    return SaleRegistrationResult.Fail(
+                        $"No hay acciones suficientes: se venden {sale.NumberOfShares} y solo hay {Math.Max(availableShares, 0)} abiertas de «{sale.CompanyName}».");
+                }
+
+                // 5. Consumir lotes hasta cubrir las acciones vendidas
+                var remaining = sale.NumberOfShares;
+                decimal totalCost = 0m;
+                decimal closedCommissions = 0m;
+                var pendingParts = new List<Operation>();
+
+                foreach (var lot in lots)
+                {
+                    if (remaining <= 0)
+                    {
+                        break;
+                    }
+
+                    if (lot.NumberOfShares <= remaining)
+                    {
+                        // Lote completo
+                        totalCost += lot.PricePerShare * lot.NumberOfShares;
+                        closedCommissions += lot.Commission;
+                        remaining -= lot.NumberOfShares;
+                        lot.CloseDate = sale.Date;
+                    }
+                    else
+                    {
+                        // Lote parcial: se divide en una fila cerrada y otra abierta duplicada.
+                        // La parte pendiente se queda con el resto para no perder céntimos.
+                        var closedShares = remaining;
+                        var pendingShares = lot.NumberOfShares - closedShares;
+                        var ratio = (decimal)closedShares / lot.NumberOfShares;
+
+                        var closedCommission = Math.Round(lot.Commission * ratio, 2);
+                        var closedAmount = Math.Round(lot.Amount * ratio, 2);
+
+                        pendingParts.Add(new Operation
+                        {
+                            CompanyName = lot.CompanyName,
+                            Type = lot.Type,
+                            Date = lot.Date,
+                            CloseDate = null,
+                            PricePerShare = lot.PricePerShare,
+                            NumberOfShares = pendingShares,
+                            Commission = lot.Commission - closedCommission,
+                            Amount = lot.Amount - closedAmount,
+                            CreatedAt = lot.CreatedAt
+                        });
+
+                        totalCost += lot.PricePerShare * closedShares;
+                        closedCommissions += closedCommission;
+
+                        lot.NumberOfShares = closedShares;
+                        lot.Commission = closedCommission;
+                        lot.Amount = closedAmount;
+                        lot.CloseDate = sale.Date;
+                        remaining = 0;
+                    }
+                }
+
+                _context.Operations.AddRange(pendingParts);
+
+                // 6. Precio medio ponderado de compra
+                var averageBuyPrice = Math.Round(totalCost / sale.NumberOfShares, 4);
+
+                // 7. La Venta se guarda cerrada
+                sale.CloseDate = sale.Date;
+                sale.CreatedAt = DateTime.Now;
+                _context.Operations.Add(sale);
+
+                // 8. Importe, comisiones y beneficio (mismo cálculo que al editar el precio de venta)
+                var roundedSellPrice = Math.Round(sellPrice, 2);
+                var amount = Math.Round(roundedSellPrice * sale.NumberOfShares, 2);
+                var commission = Math.Round(sale.Commission + closedCommissions, 2);
+                var profit = Math.Round(amount - (averageBuyPrice * sale.NumberOfShares) - commission, 2);
+
+                var record = new SaleHistory
+                {
+                    CompanyName = sale.CompanyName,
+                    Ticker = company.Ticker ?? string.Empty,
+                    SaleDate = sale.Date,
+                    NumberOfShares = sale.NumberOfShares,
+                    AverageBuyPrice = averageBuyPrice,
+                    SellPrice = roundedSellPrice,
+                    Amount = amount,
+                    Commission = commission,
+                    Profit = profit,
+                    CreatedAt = DateTime.Now,
+                    UpdatedAt = DateTime.Now
+                };
+
+                // Primero se guarda la Venta para conocer su Id y enlazarla en el histórico
+                await _context.SaveChangesAsync();
+                record.OperationId = sale.Id;
+                _context.SalesHistory.Add(record);
+                await _context.SaveChangesAsync();
+
+                // 9. Recalcular la empresa dentro de la transacción y confirmar
+                await _companyService.RecalculateTotalInvestedAsync(sale.CompanyName);
+                await transaction.CommitAsync();
+
+                return new SaleRegistrationResult { Success = true, SaleHistoryId = record.Id };
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
+                throw;
+            }
+        }
+
+        /// <summary>
         /// Actualiza una operación existente
         /// </summary>
         public async Task<bool> UpdateAsync(Operation operation)

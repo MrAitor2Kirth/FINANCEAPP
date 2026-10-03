@@ -10,7 +10,7 @@
         <div class="col">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <h1 class="display-5 fw-bold text-primary">
+                    <h1 class="sw" style="--swatch:var(--indigo)">
                         <i class="bi bi-building me-2"></i>
                         Catálogo de Empresas
                     </h1>
@@ -61,38 +61,22 @@
     else
     {
         <!-- Tarjetas de resumen -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-3">
-                <div class="card border-primary shadow-sm">
-                    <div class="card-body">
-                        <h6 class="card-subtitle mb-2 text-muted">Total Empresas</h6>
-                        <h3 class="card-title text-primary mb-0">@companies.Count</h3>
-                    </div>
-                </div>
+        <div class="stat-grid">
+            <div class="stat-card" style="--swatch:var(--indigo)">
+                <p class="stat-label">Total empresas</p>
+                <p class="stat-value">@companies.Count</p>
             </div>
-            <div class="col-md-3">
-                <div class="card border-success shadow-sm">
-                    <div class="card-body">
-                        <h6 class="card-subtitle mb-2 text-muted">Sectores Únicos</h6>
-                        <h3 class="card-title text-success mb-0">@uniqueSectorsCount</h3>
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--teal)">
+                <p class="stat-label">Sectores únicos</p>
+                <p class="stat-value">@uniqueSectorsCount</p>
             </div>
-            <div class="col-md-3">
-                <div class="card border-info shadow-sm">
-                    <div class="card-body">
-                        <h6 class="card-subtitle mb-2 text-muted">Dividend Yield Promedio</h6>
-                        <h3 class="card-title text-info mb-0">@averageDividendYield.ToString("N2")%</h3>
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--amber)">
+                <p class="stat-label">Dividend yield promedio</p>
+                <p class="stat-value">@averageDividendYield.ToString("N2")%</p>
             </div>
-            <div class="col-md-3">
-                <div class="card border-warning shadow-sm">
-                    <div class="card-body">
-                        <h6 class="card-subtitle mb-2 text-muted">Precio Promedio</h6>
-                        <h3 class="card-title text-warning mb-0">@averagePrice.ToString("C2")</h3>
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--plum)">
+                <p class="stat-label">Precio promedio</p>
+                <p class="stat-value">@averagePrice.ToString("C2")</p>
             </div>
         </div>
 
@@ -103,23 +87,14 @@
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover table-striped mb-0">
+                    <table class="table table-sm table-hover align-middle mb-0 companies-table">
                         <thead class="table-light">
                             <tr>
-                                <th scope="col" class="text-center">#</th>
-                                <th scope="col">Nombre</th>
-                                <th scope="col" class="text-center">Ticker</th>
-                                <th scope="col">Sector</th>
-                                <th scope="col" class="text-end">Precio Actual</th>
-                                <th scope="col" class="text-end">Precio en Vivo</th>
-                                <th scope="col" class="text-end">Total Invertido Inicial</th>
-                                <th scope="col" class="text-end">Número de Acciones</th>
-                                <th scope="col" class="text-end">Total Valor Invertido</th>
-                                <th scope="col" class="text-end">Total Dividendos</th>
-                                <th scope="col" class="text-center">Rentabilidad</th>
-                                <th scope="col" class="text-center">Rentabilidad + Div.</th>
-                                <th scope="col" class="text-center">Dividend Yield</th>
-                                <th scope="col" class="text-center">Información</th>
+                                <th scope="col">Empresa</th>
+                                <th scope="col" class="text-end">Precio</th>
+                                <th scope="col" class="text-end">Inversión</th>
+                                <th scope="col" class="text-end">Dividendos</th>
+                                <th scope="col">Rentabilidad</th>
                                 <th scope="col" class="text-center">Acciones</th>
                             </tr>
                         </thead>
@@ -127,104 +102,106 @@
                             @foreach (var company in companies)
                             {
                                 <tr>
-                                    <td class="text-center align-middle">
-                                        <span class="badge bg-secondary">@company.Id</span>
-                                    </td>
-                                    <td class="align-middle">
+                                    <td>
                                         <strong>@company.Name</strong>
+                                        <div class="mt-1 d-flex flex-wrap gap-1">
+                                            <span class="badge bg-primary">@company.Ticker</span>
+                                            <span class="badge @GetSectorBadgeClass(company.Sector)">@company.Sector</span>
+                                        </div>
                                     </td>
-                                    <td class="text-center align-middle">
-                                        <span class="badge bg-primary fs-6">@company.Ticker</span>
-                                    </td>
-                                    <td class="align-middle">
-                                        <span class="badge @GetSectorBadgeClass(company.Sector)">
-                                            @company.Sector
-                                        </span>
-                                    </td>
-                                    <td class="text-end align-middle">
-                                        <strong class="text-success">@company.CurrentPrice.ToString("C2")</strong>
-                                    </td>
-                                    <td class="text-end align-middle">
-                                        @if (company.LivePrice.HasValue)
-                                        {
-                                            <strong class="text-info">@company.LivePrice.Value.ToString("C2")</strong>
-                                            @if (company.LivePriceUpdatedAt.HasValue)
+                                    <td class="text-end">
+                                        <div class="cell-pair">
+                                            <span class="cell-label">Actual</span>
+                                            <strong>@company.CurrentPrice.ToString("C2")</strong>
+                                        </div>
+                                        <div class="cell-pair">
+                                            <span class="cell-label">En vivo</span>
+                                            @if (company.LivePrice.HasValue)
                                             {
-                                                <div><small class="text-muted">@GetRelativeTime(company.LivePriceUpdatedAt.Value)</small></div>
+                                                <strong class="text-info">@company.LivePrice.Value.ToString("C2")</strong>
                                             }
-                                        }
-                                        else if (isRefreshingLivePrices)
+                                            else if (isRefreshingLivePrices)
+                                            {
+                                                <span class="spinner-border spinner-border-sm text-muted" role="status"></span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">N/D</span>
+                                            }
+                                        </div>
+                                        @if (company.LivePrice.HasValue && company.LivePriceUpdatedAt.HasValue)
                                         {
-                                            <span class="spinner-border spinner-border-sm text-muted" role="status"></span>
-                                        }
-                                        else
-                                        {
-                                            <span class="text-muted">N/D</span>
+                                            <small class="text-muted">@GetRelativeTime(company.LivePriceUpdatedAt.Value)</small>
                                         }
                                     </td>
-                                    <td class="text-end align-middle">
-                                        <strong class="text-primary">@company.TotalInvestedInitial.ToString("C2")</strong>
+                                    <td class="text-end">
+                                        <div class="cell-pair">
+                                            <span class="cell-label">Inicial</span>
+                                            <span>@company.TotalInvestedInitial.ToString("C2")</span>
+                                        </div>
+                                        <div class="cell-pair">
+                                            <span class="cell-label">Valor</span>
+                                            <strong>@company.TotalInvestedValue.ToString("C2")</strong>
+                                        </div>
+                                        <div class="cell-pair">
+                                            <span class="cell-label">Nº acciones</span>
+                                            <span>@company.NumberOfShares</span>
+                                        </div>
                                     </td>
-                                    <td class="text-end align-middle">
-                                        @company.NumberOfShares
-                                    </td>
-                                    <td class="text-end align-middle">
-                                        <strong class="text-primary">@company.TotalInvestedValue.ToString("C2")</strong>
-                                    </td>
-                                    <td class="text-end align-middle">
+                                    <td class="text-end">
                                         <strong class="text-success">@company.TotalDividends.ToString("C2")</strong>
                                     </td>
-                                    <td class="text-center align-middle">
-                                        <span class="badge @GetPerformanceBadgeClass(company.PlusvaliaReturnPercent)">
-                                            @company.PlusvaliaReturnPercent.ToString("N2")%
-                                        </span>
+                                    <td>
+                                        <div class="cell-pair">
+                                            <span class="cell-label">Precio</span>
+                                            <span class="badge @GetPerformanceBadgeClass(company.PlusvaliaReturnPercent)">@company.PlusvaliaReturnPercent.ToString("N2")%</span>
+                                        </div>
+                                        <div class="cell-pair mt-1">
+                                            <span class="cell-label">Con div.</span>
+                                            <span class="badge @GetPerformanceBadgeClass(company.DividendPlusvaliaReturnPercent)">@company.DividendPlusvaliaReturnPercent.ToString("N2")%</span>
+                                        </div>
+                                        <div class="cell-pair mt-1">
+                                            <span class="cell-label">Yield</span>
+                                            @if (company.DividendYield > 0)
+                                            {
+                                                <span class="badge @GetDividendYieldBadgeClass(company.DividendYield)">@company.FormattedDividendYield</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">-</span>
+                                            }
+                                        </div>
                                     </td>
-                                    <td class="text-center align-middle">
-                                        <span class="badge @GetPerformanceBadgeClass(company.DividendPlusvaliaReturnPercent)">
-                                            @company.DividendPlusvaliaReturnPercent.ToString("N2")%
-                                        </span>
-                                    </td>
-                                    <td class="text-center align-middle">
-                                        @if (company.DividendYield > 0)
-                                        {
-                                            <span class="badge @GetDividendYieldBadgeClass(company.DividendYield)">
-                                                @company.FormattedDividendYield
-                                            </span>
-                                        }
-                                        else
-                                        {
-                                            <span class="text-muted">-</span>
-                                        }
-                                    </td>
-                                    <td class="text-center align-middle">
-                                        <a href="@company.InvestingUrl" 
-                                           target="_blank" 
-                                           rel="noopener noreferrer"
-                                           class="btn btn-sm btn-outline-primary"
-                                           title="Ver información en Investing.com">
-                                            <i class="bi bi-box-arrow-up-right me-1"></i>
-                                            Ver en Investing
-                                        </a>
-                                    </td>
-                                    <td class="text-center align-middle">
+                                    <td class="text-center">
                                         <div class="btn-group" role="group">
-                                            <button type="button" 
-                                                    class="btn btn-sm btn-outline-warning" 
+                                            <a href="@company.InvestingUrl"
+                                               target="_blank"
+                                               rel="noopener noreferrer"
+                                               class="btn btn-sm btn-outline-primary"
+                                               title="Ver información en Investing.com"
+                                               aria-label="Ver información en Investing.com">
+                                                <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                                            </a>
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-warning"
                                                     @onclick="() => EditCompany(company.Id)"
-                                                    title="Editar empresa">
-                                                <i class="bi bi-pencil-fill"></i>
+                                                    title="Editar empresa"
+                                                    aria-label="Editar empresa">
+                                                <i class="bi bi-pencil-fill" aria-hidden="true"></i>
                                             </button>
-                                            <button type="button" 
-                                                    class="btn btn-sm btn-outline-danger" 
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-danger"
                                                     @onclick="() => ConfirmDelete(company)"
-                                                    title="Eliminar empresa">
-                                                <i class="bi bi-trash-fill"></i>
+                                                    title="Eliminar empresa"
+                                                    aria-label="Eliminar empresa">
+                                                <i class="bi bi-trash-fill" aria-hidden="true"></i>
                                             </button>
-                                            <button type="button" 
-                                                    class="btn btn-sm btn-outline-secondary" 
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-secondary"
                                                     @onclick="() => ShowChart(company)"
-                                                    title="Ver gráfico de cotización">
-                                                <i class="bi bi-bar-chart-line-fill"></i>
+                                                    title="Ver gráfico de cotización"
+                                                    aria-label="Ver gráfico de cotización">
+                                                <i class="bi bi-bar-chart-line-fill" aria-hidden="true"></i>
                                             </button>
                                         </div>
                                     </td>
@@ -249,7 +226,7 @@
                 Acerca de los Enlaces
             </h5>
             <p class="mb-0">
-                Los enlaces "Ver en Investing" se abren en una nueva pestaña y dirigen al sitio 
+                Los botones con el icono de enlace externo se abren en una nueva pestaña y dirigen al sitio 
                 <strong>Investing.com</strong> para consultar información actualizada sobre cada empresa.
                 Los datos se buscan automáticamente usando el ticker de cotización.
             </p>

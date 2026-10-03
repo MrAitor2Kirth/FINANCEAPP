@@ -11,8 +11,7 @@ main {
 }
 
 .sidebar {
-    background: var(--surface);
-    border-bottom: 1px solid var(--line);
+    background: var(--indigo-deep);
 }
 
 .content {
@@ -29,8 +28,6 @@ main {
         height: 100vh;
         position: sticky;
         top: 0;
-        border-bottom: 0;
-        border-right: 1px solid var(--line);
     }
 
     .content {

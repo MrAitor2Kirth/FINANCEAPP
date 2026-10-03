@@ -11,7 +11,7 @@
 <div class="container-fluid mt-4">
     <div class="row mb-4">
         <div class="col-12">
-            <h1>Gestión de Propiedades e Inmuebles</h1>
+            <h1 class="sw" style="--swatch:var(--plum)">Gestión de Propiedades e Inmuebles</h1>
             <p class="text-muted">Administra tus inversiones inmobiliarias y realiza seguimiento de ingresos y gastos</p>
         </div>
     </div>
@@ -25,7 +25,7 @@
     else if (properties == null || properties.Count == 0)
     {
         <div class="alert alert-warning">
-            <span class="oi oi-warning"></span> No hay propiedades registradas
+            <i class="bi bi-exclamation-triangle me-1" aria-hidden="true"></i> No hay propiedades registradas
             <button class="btn btn-primary ms-3" @onclick="NavigateToNew">
                 Registrar primera propiedad
             </button>
@@ -36,46 +36,27 @@
         <div class="row mb-3">
             <div class="col-12">
                 <button class="btn btn-primary" @onclick="NavigateToNew">
-                    <span class="oi oi-plus"></span> Nueva Propiedad
+                    <i class="bi bi-plus-lg me-1" aria-hidden="true"></i> Nueva Propiedad
                 </button>
             </div>
         </div>
 
-        <div class="row mb-4">
-            <div class="col-md-3">
-                <div class="card">
-                    <div class="card-body text-center">
-                        <h6 class="card-title">Inversión Total</h6>
-                        <h4>@totalInvested.ToString("C")</h4>
-                    </div>
-                </div>
+        <div class="stat-grid">
+            <div class="stat-card" style="--swatch:var(--plum)">
+                <p class="stat-label">Inversión total</p>
+                <p class="stat-value">@totalInvested.ToString("C")</p>
             </div>
-            <div class="col-md-3">
-                <div class="card">
-                    <div class="card-body text-center">
-                        <h6 class="card-title">Ingresos</h6>
-                        <h4 class="text-success">@totalIncome.ToString("C")</h4>
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--teal)">
+                <p class="stat-label">Ingresos</p>
+                <p class="stat-value text-success">@totalIncome.ToString("C")</p>
             </div>
-            <div class="col-md-3">
-                <div class="card">
-                    <div class="card-body text-center">
-                        <h6 class="card-title">Gastos</h6>
-                        <h4 class="text-danger">@totalExpenses.ToString("C")</h4>
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--amber)">
+                <p class="stat-label">Gastos</p>
+                <p class="stat-value text-danger">@totalExpenses.ToString("C")</p>
             </div>
-            <div class="col-md-3">
-                <div class="card">
-                    <div class="card-body text-center">
-                        <h6 class="card-title">Resultado Neto</h6>
-                        <h4 class="@(netResult >= 0 ? "text-success" : "text-danger")">
-                            @netResult.ToString("C")
-                        </h4>
-
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--sage)">
+                <p class="stat-label">Resultado neto</p>
+                <p class="stat-value @(netResult >= 0 ? "text-success" : "text-danger")">@netResult.ToString("C")</p>
             </div>
         </div>
 
@@ -116,10 +97,10 @@
                             </td>
                             <td>
                                 <button class="btn btn-sm btn-outline-primary" @onclick="() => NavigateToDetail(property.Id)">
-                                    <span class="oi oi-eye"></span>
+                                    <i class="bi bi-eye" aria-hidden="true"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-secondary" @onclick="() => NavigateToEdit(property.Id)">
-                                    <span class="oi oi-pencil"></span>
+                                    <i class="bi bi-pencil" aria-hidden="true"></i>
                                 </button>
                                 @if (property.Status != "Vendida")
                                 {
@@ -128,7 +109,7 @@
                                     </button>
                                 }
                                 <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteProperty(property.Id)">
-                                    <span class="oi oi-trash"></span>
+                                    <i class="bi bi-trash" aria-hidden="true"></i>
                                 </button>
                             </td>
                         </tr>

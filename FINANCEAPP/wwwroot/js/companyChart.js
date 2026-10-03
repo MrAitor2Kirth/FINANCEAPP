@@ -11,7 +11,7 @@ window.companyChart = (function () {
                 marker: {
                     size: 6,
                     fillColor: '#ffffff',
-                    strokeColor: '#0d6efd',
+                    strokeColor: '#3F3B9B',
                     strokeWidth: 2,
                     shape: 'circle'
                 },
@@ -64,11 +64,11 @@ window.companyChart = (function () {
         if (data.currentPrice !== null && data.currentPrice !== undefined) {
             yAxisAnnotations.push({
                 y: data.currentPrice,
-                borderColor: '#198754',
+                borderColor: '#177A4D',
                 strokeDashArray: 0,
                 label: {
-                    borderColor: '#198754',
-                    style: { color: '#ffffff', background: '#198754' },
+                    borderColor: '#177A4D',
+                    style: { color: '#ffffff', background: '#177A4D' },
                     text: 'Precio actual: ' + Number(data.currentPrice).toFixed(2) + ' €'
                 }
             });
@@ -92,7 +92,7 @@ window.companyChart = (function () {
                 }
             },
             stroke: { curve: 'straight', width: 2 },
-            colors: ['#0d6efd'],
+            colors: ['#3F3B9B'],
             tooltip: { x: { format: 'dd MMM yyyy' } },
             annotations: {
                 points: buildPointAnnotations(data.operations),

@@ -11,7 +11,7 @@
 <div class="container-fluid mt-4">
     <div class="row mb-4">
         <div class="col-12">
-            <h1>Gestión de Cuentas Bancarias</h1>
+            <h1 class="sw" style="--swatch:var(--sage)">Gestión de Cuentas Bancarias</h1>
             <p class="text-muted">Administra tus cuentas bancarias y realiza seguimiento de movimientos</p>
         </div>
     </div>
@@ -25,7 +25,7 @@
     else if (bankAccounts == null || bankAccounts.Count == 0)
     {
         <div class="alert alert-warning">
-            <span class="oi oi-warning"></span> No hay cuentas bancarias registradas
+            <i class="bi bi-exclamation-triangle me-1" aria-hidden="true"></i> No hay cuentas bancarias registradas
             <button class="btn btn-primary ms-3" @onclick="NavigateToNewAccount">
                 Crear primera cuenta
             </button>
@@ -36,35 +36,23 @@
         <div class="row mb-3">
             <div class="col-12">
                 <button class="btn btn-primary" @onclick="NavigateToNewAccount">
-                    <span class="oi oi-plus"></span> Nueva Cuenta
+                    <i class="bi bi-plus-lg me-1" aria-hidden="true"></i> Nueva Cuenta
                 </button>
             </div>
         </div>
 
-        <div class="row mb-4">
-            <div class="col-md-4">
-                <div class="card text-center">
-                    <div class="card-body">
-                        <h6 class="card-title">Saldo Total</h6>
-                        <h3 class="text-success">@totalBalance.ToString("C")</h3>
-                    </div>
-                </div>
+        <div class="stat-grid">
+            <div class="stat-card" style="--swatch:var(--sage)">
+                <p class="stat-label">Saldo total</p>
+                <p class="stat-value @(totalBalance >= 0 ? "" : "text-danger")">@totalBalance.ToString("C")</p>
             </div>
-            <div class="col-md-4">
-                <div class="card text-center">
-                    <div class="card-body">
-                        <h6 class="card-title">Cuentas Activas</h6>
-                        <h3>@bankAccounts.Count</h3>
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--teal)">
+                <p class="stat-label">Cuentas activas</p>
+                <p class="stat-value">@bankAccounts.Count</p>
             </div>
-            <div class="col-md-4">
-                <div class="card text-center">
-                    <div class="card-body">
-                        <h6 class="card-title">Promedio por Cuenta</h6>
-                        <h3>@(bankAccounts.Count > 0 ? (totalBalance / bankAccounts.Count).ToString("C") : "N/A")</h3>
-                    </div>
-                </div>
+            <div class="stat-card" style="--swatch:var(--indigo)">
+                <p class="stat-label">Promedio por cuenta</p>
+                <p class="stat-value">@(bankAccounts.Count > 0 ? (totalBalance / bankAccounts.Count).ToString("C") : "N/A")</p>
             </div>
         </div>
 
@@ -99,13 +87,13 @@
                             </td>
                             <td>
                                 <button class="btn btn-sm btn-outline-primary" @onclick="() => NavigateToDetail(account.Id)">
-                                    <span class="oi oi-eye"></span>
+                                    <i class="bi bi-eye" aria-hidden="true"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-secondary" @onclick="() => NavigateToEdit(account.Id)">
-                                    <span class="oi oi-pencil"></span>
+                                    <i class="bi bi-pencil" aria-hidden="true"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAccount(account.Id)">
-                                    <span class="oi oi-trash"></span>
+                                    <i class="bi bi-trash" aria-hidden="true"></i>
                                 </button>
                             </td>
                         </tr>

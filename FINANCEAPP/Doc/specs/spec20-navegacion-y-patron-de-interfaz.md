@@ -25,8 +25,8 @@ Define cómo se navega por la aplicación y el patrón visual y de interacción 
 - Cada fila ofrece acciones de editar, eliminar y ver detalle; la baja pide confirmación.
 - El componente `DataTableBase<TItem>` encapsula una tabla reutilizable (título, botón de alta, plantilla de filas, fila de operaciones, mensaje «No hay registros disponibles» y paginación opcional).
 - Interfaz en español, basada en Bootstrap con iconos Bootstrap Icons. El aspecto propio (colores, tipografías y componentes comunes) está en variables CSS de `wwwroot/app.css` que sobrescriben las de Bootstrap.
-- Sistema visual «instrumento de precisión»: fondo gris azulado, tinta marino, verde para ganancias y ladrillo para pérdidas (con flecha ▲/▼ además del color), latón como único acento. Importes en tipografía monoespaciada con cifras tabulares.
-- El menú lateral es claro, con el elemento activo marcado en latón; ya no hay barra superior con enlaces externos.
+- Sistema visual «instrumento de precisión» en versión cálida: fondo gris cálido, texto en azul índigo oscuro, menú lateral índigo profundo y un color por clase de activo (acciones índigo, fondos turquesa, refugio ámbar, inmuebles ciruela, efectivo salvia). Verde y rojo se reservan para ganancias y pérdidas (con flecha ▲/▼ además del color). Importes en tipografía monoespaciada con cifras tabulares.
+- El menú lateral es índigo oscuro, con el elemento activo marcado en ámbar; ya no hay barra superior con enlaces externos.
 - Las tipografías previstas son Bricolage Grotesque, Instrument Sans y Spline Sans Mono desde `wwwroot/fonts`; si faltan los `.woff2` se usa la fuente del sistema (Segoe UI, Consolas).
 - La página de host define viewport móvil y una zona de seguridad superior (`status-bar-safe-area`).
 - Existe un banner de error no controlado de Blazor con opción de recargar.
@@ -59,5 +59,5 @@ Define cómo se navega por la aplicación y el patrón visual y de interacción 
 - Las rutas mezclan inglés y español (`/companies`, `/operations` frente a `/fondos`, `/banco`, `/inmuebles`).
 - `DataTableBase` está definido pero las pantallas actuales usan tablas propias; conviene unificarlas.
 - Existen páginas de plantilla sin uso funcional (`Counter`, `Weather`).
-- El rediseño visual está aplicado a menú, Inicio y Dashboard; los listados y formularios solo heredan colores y tablas globales.
+- El rediseño visual está aplicado a todas las páginas. Cada título lleva la marca de color de su clase y los resúmenes usan tarjetas con banda de color. El listado de Empresas agrupa sus cifras en 7 columnas (empresa, precio, inversión, dividendos, rentabilidad, yield y acciones). Los formularios y la tabla de Operaciones solo heredan colores y estilos globales.
 - Inicio muestra el saldo de `IFinancialService` (legado v1), que no coincide con el patrimonio del Dashboard.
