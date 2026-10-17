@@ -166,7 +166,25 @@
                 var existingProperty = await PropertyService.GetPropertyByIdAsync(Id);
                 if (existingProperty != null)
                 {
-                    property = existingProperty;
+                    // Se edita una copia: si se editaba la entidad del contexto, al cancelar los cambios
+                    // quedaban en memoria y se veían en el resto de pantallas sin haberse guardado
+                    property = new Property
+                    {
+                        Id = existingProperty.Id,
+                        Name = existingProperty.Name,
+                        PropertyType = existingProperty.PropertyType,
+                        Address = existingProperty.Address,
+                        PurchasePrice = existingProperty.PurchasePrice,
+                        PurchaseDate = existingProperty.PurchaseDate,
+                        CurrentValue = existingProperty.CurrentValue,
+                        Status = existingProperty.Status,
+                        MonthlyRent = existingProperty.MonthlyRent,
+                        SaleDate = existingProperty.SaleDate,
+                        TotalInvested = existingProperty.TotalInvested,
+                        TotalIncome = existingProperty.TotalIncome,
+                        CreatedAt = existingProperty.CreatedAt,
+                        UpdatedAt = existingProperty.UpdatedAt
+                    };
                 }
                 else
                 {

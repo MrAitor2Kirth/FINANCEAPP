@@ -102,6 +102,37 @@ namespace FINANCEAPP.Data
         public DbSet<SaleHistory> SalesHistory { get; set; }
 
         /// <summary>
+        /// DbSet de los ajustes de la aplicación (clave/valor; por ahora el logo)
+        /// Representa la tabla AppSettings en la base de datos
+        /// </summary>
+        public DbSet<AppSetting> AppSettings { get; set; }
+
+        /// <summary>
+        /// DbSet del catálogo de países (SPEC-01-02). Tabla Countries
+        /// </summary>
+        public DbSet<Country> Countries { get; set; }
+
+        /// <summary>
+        /// DbSet del catálogo de empresas de mercado (SPEC-01-04, solo lectura). Tabla MarketCompanies
+        /// </summary>
+        public DbSet<MarketCompany> MarketCompanies { get; set; }
+
+        /// <summary>
+        /// DbSet de los tipos de cambio actuales (SPEC-01-03). Tabla ExchangeRates
+        /// </summary>
+        public DbSet<ExchangeRate> ExchangeRates { get; set; }
+
+        /// <summary>
+        /// DbSet de documentos adjuntos a inmuebles (SPEC-14-01). Tabla PropertyDocuments
+        /// </summary>
+        public DbSet<PropertyDocument> PropertyDocuments { get; set; }
+
+        /// <summary>
+        /// DbSet de las capturas mensuales del patrimonio (SPEC-17-01). Tabla WealthSnapshots
+        /// </summary>
+        public DbSet<WealthSnapshot> WealthSnapshots { get; set; }
+
+        /// <summary>
         /// Configuración del modelo de datos
         /// Establece índices, relaciones y constraints adicionales
         /// </summary>
@@ -139,6 +170,10 @@ namespace FINANCEAPP.Data
                 // Índice en Type para filtrado por tipo de operación
                 entity.HasIndex(e => e.Type)
                     .HasDatabaseName("IX_Operations_Type");
+
+                // Índice en SaleHistoryId para localizar las compras cerradas por una venta
+                entity.HasIndex(e => e.SaleHistoryId)
+                    .HasDatabaseName("IX_Operations_SaleHistoryId");
 
                 // Configurar propiedades requeridas
                 entity.Property(e => e.CompanyName)
@@ -409,6 +444,16 @@ namespace FINANCEAPP.Data
                 // Ignorar propiedades calculadas
                 entity.Ignore(e => e.IsIncome);
                 entity.Ignore(e => e.IsExpense);
+            });
+
+            // Configuración de la entidad PropertyDocument (SPEC-14-01)
+            modelBuilder.Entity<PropertyDocument>(entity =>
+            {
+                entity.HasIndex(e => e.PropertyId)
+                    .HasDatabaseName("IX_PropertyDocuments_PropertyId");
+
+                entity.Property(e => e.FileName).IsRequired().HasMaxLength(200);
+                entity.Property(e => e.ContentType).IsRequired().HasMaxLength(100);
             });
 
             // Datos de ejemplo (seed data) para pruebas
@@ -886,6 +931,73 @@ namespace FINANCEAPP.Data
 
                 entity.Property(e => e.Ticker)
                     .HasMaxLength(20);
+            });
+
+            // Configuración de la entidad AppSetting (ajustes clave/valor)
+            modelBuilder.Entity<AppSetting>(entity =>
+            {
+                entity.ToTable("AppSettings");
+                entity.HasKey(e => e.Key);
+
+                entity.Property(e => e.Key)
+                    .HasMaxLength(100);
+
+                entity.Property(e => e.TextValue)
+                    .HasMaxLength(200);
+            });
+
+            // Configuración de la entidad Country (catálogo de países y divisas)
+            modelBuilder.Entity<Country>(entity =>
+            {
+                entity.ToTable("Countries");
+                entity.HasKey(e => e.Code);
+
+                entity.Property(e => e.Code).HasMaxLength(3);
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+                entity.Property(e => e.Region).IsRequired().HasMaxLength(20);
+                entity.Property(e => e.CurrencyCode).IsRequired().HasMaxLength(3);
+
+                entity.HasIndex(e => e.Name)
+                    .IsUnique()
+                    .HasDatabaseName("IX_Countries_Name");
+            });
+
+            // Configuración de la entidad MarketCompany (catálogo de mercado, solo lectura)
+            modelBuilder.Entity<MarketCompany>(entity =>
+            {
+                entity.ToTable("MarketCompanies");
+                entity.HasKey(e => e.Ticker);
+
+                entity.Property(e => e.Ticker).HasMaxLength(20);
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+                entity.Property(e => e.CountryCode).IsRequired().HasMaxLength(3);
+                entity.Property(e => e.Indices).IsRequired().HasMaxLength(100);
+            });
+
+            // Configuración de la entidad ExchangeRate (tipos de cambio actuales)
+            modelBuilder.Entity<ExchangeRate>(entity =>
+            {
+                entity.ToTable("ExchangeRates");
+                entity.HasKey(e => new { e.CurrencyCode, e.BaseCurrencyCode });
+
+                entity.Property(e => e.CurrencyCode).HasMaxLength(3);
+                entity.Property(e => e.BaseCurrencyCode).HasMaxLength(3);
+                entity.Property(e => e.Rate).HasColumnType("decimal(18,6)");
+                entity.Property(e => e.Source).IsRequired().HasMaxLength(10);
+            });
+
+            // Configuración de la entidad WealthSnapshot (capturas mensuales del patrimonio, SPEC-17-01)
+            modelBuilder.Entity<WealthSnapshot>(entity =>
+            {
+                entity.ToTable("WealthSnapshots");
+
+                // Una sola captura por año y mes
+                entity.HasIndex(e => new { e.Year, e.Month })
+                    .IsUnique()
+                    .HasDatabaseName("IX_WealthSnapshots_Year_Month");
+
+                entity.Property(e => e.CurrencyCode).IsRequired().HasMaxLength(3);
+                entity.Property(e => e.Note).HasMaxLength(200);
             });
         }
     }

@@ -1,0 +1,58 @@
+@implements IDisposable
+@inject IAppSettingsService AppSettings
+
+@* Pinta el logo de la app en una placa clara. Sin logo, pinta el contenido de NoLogo (si se indica). *@
+@if (logo != null)
+{
+    @if (Href != null)
+    {
+        <a class="@CssClass" href="@Href" title="Ir a Inicio">
+            <img src="@logo.DataUri" alt="Logo de FINANCEAPP" />
+        </a>
+    }
+    else
+    {
+        <span class="@CssClass">
+            <img src="@logo.DataUri" alt="Logo de FINANCEAPP" />
+        </span>
+    }
+}
+else if (NoLogo != null)
+{
+    @NoLogo
+}
+
+@code {
+    /// <summary>Variante de tamaño: sidebar, hero o compact</summary>
+    [Parameter] public string Variant { get; set; } = "compact";
+
+    /// <summary>Si se indica, la placa es un enlace a esa dirección</summary>
+    [Parameter] public string? Href { get; set; }
+
+    /// <summary>Contenido que se pinta cuando no hay logo</summary>
+    [Parameter] public RenderFragment? NoLogo { get; set; }
+
+    private AppLogoImage? logo;
+
+    private string CssClass => $"app-logo app-logo--{Variant}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        AppSettings.LogoChanged += OnLogoChanged;
+        logo = await AppSettings.GetLogoAsync();
+    }
+
+    private void OnLogoChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            logo = await AppSettings.GetLogoAsync();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        AppSettings.LogoChanged -= OnLogoChanged;
+    }
+}

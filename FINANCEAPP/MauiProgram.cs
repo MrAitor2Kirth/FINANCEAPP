@@ -185,6 +185,17 @@ namespace FINANCEAPP
             builder.Services.AddHttpClient<IStockPriceService, StockPriceService>();
             builder.Services.AddScoped<IPriceHistoryService, PriceHistoryService>();
             builder.Services.AddScoped<ISaleHistoryService, SaleHistoryService>();
+            builder.Services.AddScoped<IAppSettingsService, AppSettingsService>();
+            builder.Services.AddScoped<ICountryService, CountryService>();
+            builder.Services.AddScoped<IMarketCatalogService, MarketCatalogService>();
+            builder.Services.AddScoped<IExchangeRateService, ExchangeRateService>();
+            builder.Services.AddScoped<IPropertyDocumentService, PropertyDocumentService>();
+            builder.Services.AddScoped<IClaudeApiKeyStore, ClaudeApiKeyStore>();
+            builder.Services.AddScoped<IWealthSnapshotService, WealthSnapshotService>();
+            builder.Services.AddHttpClient<IClaudeDocumentReader, ClaudeDocumentReader>(client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(60);
+            });
 
             var app = builder.Build();
 
@@ -200,6 +211,27 @@ namespace FINANCEAPP
                 DatabaseSchemaUpgrader.EnsureCompanyDetailLivePriceColumns(context);
                 DatabaseSchemaUpgrader.EnsurePriceHistoryTable(context);
                 DatabaseSchemaUpgrader.EnsureSalesHistoryTable(context);
+                DatabaseSchemaUpgrader.EnsureOperationSaleColumns(context);
+                DatabaseSchemaUpgrader.EnsureAppSettingsTable(context);
+                DatabaseSchemaUpgrader.EnsureCountriesTable(context);
+                DatabaseSchemaUpgrader.EnsureCompanyCountryColumn(context);
+                DatabaseSchemaUpgrader.EnsureOperationCurrencyColumn(context);
+                DatabaseSchemaUpgrader.EnsureExchangeRatesTable(context);
+                DatabaseSchemaUpgrader.EnsureOperationExchangeRateColumns(context);
+                DatabaseSchemaUpgrader.EnsureMarketCatalogTable(context);
+                DatabaseSchemaUpgrader.EnsurePropertyDocumentsTable(context);
+                DatabaseSchemaUpgrader.EnsureWealthSnapshotsTable(context);
+
+                // Corrige inmuebles antiguos guardados con total invertido 0 (no tocaba el patrimonio)
+                DatabaseSchemaUpgrader.RepairPropertyTotals(context);
+
+                // Reabre compras que quedaron cerradas por una venta ya deshecha (y recalcula sus empresas).
+                // Task.Run evita bloquear el hilo principal esperando a sí mismo.
+                var operationService = scope.ServiceProvider.GetRequiredService<FINANCEAPP.Services.IOperationService>();
+                Task.Run(() => operationService.RepairOrphanSaleLinksAsync()).GetAwaiter().GetResult();
+
+                // Borra copias temporales de documentos abiertos en sesiones anteriores
+                PropertyDocumentService.CleanTempFiles();
 
 #if DEBUG
                 var logger = scope.ServiceProvider.GetRequiredService<ILogger<AppDbContext>>();

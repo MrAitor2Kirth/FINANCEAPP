@@ -433,8 +433,374 @@ h1.sw > .bi { display: none; }
     white-space: nowrap;
 }
 
+/* Gráfico de cotización: visor en vivo, operativa y capas (SPEC-05-01) */
+.company-chart-candle-tooltip {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+}
+
+.live-quote {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--indigo);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+
+.live-quote-price {
+    font-family: var(--font-mono);
+    font-size: 1.6rem;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.1;
+}
+
+.live-quote-change.gain { color: var(--gain); }
+.live-quote-change.loss { color: var(--loss); }
+
+.live-quote-meta {
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+}
+
+.live-quote-meta strong { color: var(--ink); font-family: var(--font-mono); font-weight: 500; }
+
+.market-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.market-badge.open { background: rgba(23, 122, 77, 0.12); color: var(--gain); }
+.market-badge.closed { background: rgba(194, 59, 46, 0.12); color: var(--loss); }
+.market-badge.unknown { background: var(--paper-2); color: var(--ink-soft); }
+
+.live-quote-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-left: auto;
+    align-items: center;
+}
+
+.btn-trade-buy { background: var(--gain); border-color: var(--gain); color: #fff; }
+.btn-trade-buy:hover, .btn-trade-buy:focus { background: #12613D; border-color: #12613D; color: #fff; }
+.btn-trade-sell { background: var(--loss); border-color: var(--loss); color: #fff; }
+.btn-trade-sell:hover, .btn-trade-sell:focus { background: #A23126; border-color: #A23126; color: #fff; }
+
+.trade-form {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--paper);
+    padding: 1rem;
+}
+
+.trade-form.buy { border-top: 3px solid var(--gain); }
+.trade-form.sell { border-top: 3px solid var(--loss); }
+
+.trade-form .form-label { font-size: 0.8rem; margin-bottom: 0.2rem; color: var(--ink-soft); }
+
+.trade-form-amount {
+    font-family: var(--font-mono);
+    font-size: 1.15rem;
+    font-weight: 600;
+}
+
+.chart-layers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    align-items: center;
+    font-size: 0.85rem;
+}
+
+.chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+}
+
+.chart-legend-dot {
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    margin-right: 0.3rem;
+    vertical-align: -0.05rem;
+}
+
+.chart-legend-dot.buy { color: var(--indigo); }
+.chart-legend-dot.transfer { color: #6C63C7; }
+.chart-legend-dot.sell { color: var(--loss); border-radius: 2px; }
+.chart-legend-dot.dividend { color: var(--gain); background: var(--gain); }
+
+.position-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    font-size: 0.85rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius);
+    background: var(--paper-2);
+}
+
+.position-summary strong { font-family: var(--font-mono); font-weight: 500; }
+
+.bi.spin { display: inline-block; animation: chart-spin 1s linear infinite; }
+
+@keyframes chart-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 576px) {
+    .live-quote-actions { margin-left: 0; width: 100%; }
+    .live-quote-actions .btn { flex: 1; }
+}
+
 /* Listado de empresas: tabla compacta para que quepa sin barra horizontal */
 .companies-table { font-size: 0.86rem; }
 .companies-table > :not(caption) > * > * { padding: 0.45rem 0.6rem; }
 .companies-table .cell-pair { gap: 0.75rem; }
 .companies-table .badge { font-size: 0.72rem; padding: 0.3em 0.5em; }
+/* Modo corto del listado: una sola linea por empresa */
+.companies-table--compact th,
+.companies-table--compact td { white-space: nowrap; }
+.companies-table--compact td { padding-top: 0.35rem; padding-bottom: 0.35rem; }
+
+
+/* ==========================================================================
+   Logo de la app (SPEC-20-01): placa clara que sostiene el logo.
+   La imagen se funde con la placa blanca (multiply), asi el fondo casi blanco
+   de un JPG no deja borde visible. Variantes: sidebar, hero y compact.
+   ========================================================================== */
+.app-logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    max-width: 100%;
+    padding: 0.4rem 0.7rem;
+    background: linear-gradient(165deg, #F3F0FA 0%, #E2DEF3 100%);
+    border: 1px solid rgba(63, 59, 155, 0.14);
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(35, 31, 58, 0.08), 0 10px 20px -12px rgba(35, 31, 58, 0.35);
+    line-height: 0;
+    text-decoration: none;
+}
+
+.app-logo img {
+    display: block;
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+    object-fit: contain;
+    mix-blend-mode: multiply;
+    filter: saturate(1.15);
+}
+
+a.app-logo:hover { border-color: var(--amber); }
+
+/* Menu lateral: placa lavanda con filete ambar, integrada con el indigo */
+.app-logo--sidebar {
+    display: flex;
+    width: 100%;
+    height: 6rem;
+    padding: 0.5rem 0.75rem;
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 2px 0 var(--amber), 0 12px 22px -14px rgba(0, 0, 0, 0.7);
+}
+
+/* Inicio: encabeza el bloque principal */
+.app-logo--hero {
+    height: 7rem;
+    margin-bottom: 1.25rem;
+    padding: 0.6rem 1rem;
+}
+
+/* Dashboard: junto al titulo */
+.app-logo--compact {
+    flex: none;
+    height: 3.25rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: 10px;
+}
+
+.page-head-title {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-width: 0;
+}
+
+@media (max-width: 640px) {
+    /* Barra superior movil: la placa deja sitio al boton de menu */
+    .app-logo--sidebar {
+        width: auto;
+        height: 2.5rem;
+        max-width: calc(100% - 4.25rem);
+        padding: 0.2rem 0.5rem;
+        border-radius: 8px;
+    }
+
+    .app-logo--hero { height: 5.5rem; }
+    .app-logo--compact { height: 2.75rem; }
+}
+
+/* Configuracion: ajustes y vista previa del logo */
+.logo-settings {
+    display: grid;
+    gap: 1.5rem;
+    grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 900px) {
+    .logo-settings { grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr); }
+}
+
+.logo-previews {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    align-items: start;
+}
+
+.logo-preview { margin: 0; }
+
+.logo-preview-stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 9rem;
+    padding: 1rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+
+.logo-preview--dark .logo-preview-stage {
+    background: var(--indigo-deep);
+    border-color: var(--indigo-deep);
+}
+
+.logo-preview--light .logo-preview-stage { background: var(--paper); }
+
+.logo-preview .app-logo--sidebar {
+    width: 100%;
+    max-width: 15.5rem;
+}
+
+.logo-preview figcaption {
+    margin-top: 0.4rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.logo-empty {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 9rem;
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--ink-soft);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+}
+
+.logo-empty .bi { font-size: 1.75rem; }
+
+/* ---- Histórico (SPEC-17-01) ------------------------------------------- */
+.history-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1rem;
+}
+
+.history-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 1.1rem 1.2rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--swatch, var(--indigo));
+    border-radius: var(--radius);
+    color: var(--ink);
+    text-decoration: none;
+}
+a.history-card:hover { border-color: var(--swatch, var(--amber)); color: var(--ink); }
+.history-card.is-disabled { opacity: 0.6; cursor: not-allowed; }
+.history-card-icon { font-size: 1.5rem; color: var(--swatch, var(--indigo)); }
+.history-card-title { font-family: var(--font-display); font-size: 1.15rem; font-weight: 600; }
+.history-card-text { font-size: 0.9rem; color: var(--ink-soft); }
+.history-card-meta { margin-top: auto; padding-top: 0.5rem; font-size: 0.82rem; color: var(--ink-soft); }
+
+.history-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 2.5rem 1rem;
+    text-align: center;
+    color: var(--ink-soft);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+}
+.empty-state .bi { font-size: 1.75rem; }
+.empty-state p { margin: 0; }
+
+.wealth-table td, .wealth-table th { white-space: nowrap; }
+.wealth-table .wealth-note { white-space: normal; min-width: 10rem; max-width: 22rem; }
+.wealth-detail > td { background: var(--paper-2); }
+
+.wealth-classes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+}
+
+.wealth-class {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.5rem 0.7rem;
+    background: var(--surface);
+    border-left: 4px solid var(--swatch, var(--line));
+    border-radius: 6px;
+}
+
+.wealth-variation { margin: -0.5rem 0 1rem; font-size: 0.95rem; }
+
+.swatch-dot {
+    display: inline-block;
+    width: 0.65rem;
+    height: 0.65rem;
+    margin-right: 0.5rem;
+    border-radius: 2px;
+    background: var(--swatch, var(--line));
+}
+
+.capture-total { display: flex; flex-direction: column; margin-bottom: 0.75rem; }
+.capture-total-value { font-size: 1.8rem; font-weight: 500; letter-spacing: -0.02em; }

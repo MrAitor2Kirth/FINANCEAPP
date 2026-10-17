@@ -25,15 +25,19 @@ FINANCEAPP/                    raíz del repositorio
 │   ├── Data/DatabaseSchemaUpgrader.cs   ÚNICA vía para evolucionar el esquema
 │   ├── Models/                entidades; calculados marcados [NotMapped]
 │   ├── Services/              I*Service + implementación (lógica de negocio)
-│   ├── wwwroot/js/companyChart.js       interop JS del gráfico de cotización
-│   └── doc/                   documentación: README.md + specs/specNN/specNN.md (+ features)
+│   ├── wwwroot/js/companyChart.js       interop JS del gráfico de cotización (render, updateLive, destroy)
+│   ├── wwwroot/js/logoTools.js          interop JS que recorta y reduce el logo al subirlo
+│   ├── wwwroot/js/wealthChart.js        interop JS del gráfico de evolución del patrimonio (SPEC-17-01)
+│   ├── Components/Pages/History/        módulo Histórico: hub, capturas del patrimonio y modal de captura
+│   ├── Components/Layout/AppLogo.razor  pinta el logo de la app (placa clara) o el contenido NoLogo
+│   └── doc/                   documentación: README.md + specs/specNN-<nombre>/specNN.md (+ features)
 ├── Backups/                   copias de la BD (BACKUPddmmaaaa.db), ignorada en .gitignore
 ├── TempDbViewer/              utilidad auxiliar para inspeccionar la BD
 ├── RecreateDatabase.ps1       BORRA la BD para regenerarla
 └── *.md (raíz y FINANCEAPP/)  notas históricas de desarrollo, NO son referencia vigente
 ```
 
-Los seis principios innegociables están en `FINANCEAPP/doc/constitution.md`: léelos antes de empezar. La referencia vigente es `FINANCEAPP/doc/README.md` y las specs de `FINANCEAPP/doc/specs/` (una carpeta por spec: `specNN/specNN.md`). Los `.md` históricos (`DISEÑO_ARQUITECTONICO_V2.md`, `RESUMEN_*.md`, etc.) pueden estar desactualizados.
+Los seis principios innegociables están en `FINANCEAPP/doc/constitution.md`: léelos antes de empezar. La referencia vigente es `FINANCEAPP/doc/README.md` y las specs de `FINANCEAPP/doc/specs/` (una carpeta por spec: `specNN-<nombre>/specNN.md`). Los `.md` históricos (`DISEÑO_ARQUITECTONICO_V2.md`, `RESUMEN_*.md`, etc.) pueden estar desactualizados.
 
 ## Comandos
 
@@ -65,10 +69,10 @@ dotnet restore FINANCEAPP.slnx
 
 - **Idioma**: interfaz, textos, mensajes de error, comentarios XML y documentación en **español**. Identificadores de código en inglés, salvo las rutas ya existentes en español (`/fondos`, `/banco`, `/inmuebles`, `/activos-refugio`) o inglés (`/companies`, `/operations`): no renombrarlas.
 - **Nombres en inglés**: las carpetas, ficheros, specs, features, entidades, servicios, páginas, tablas y rutas **nuevas** se nombran en inglés (p. ej. `spec02-01-sales-history`, `/sales-history`, `SalesHistoryList.razor`). Los textos visibles y la documentación siguen en español. Lo ya existente en español no se renombra.
-- **Specs y features**: cada spec vive en `FINANCEAPP/doc/specs/specNN/specNN.md`. Una funcionalidad nueva o un cambio importante se documenta como feature en `FINANCEAPP/doc/specs/specNN/specNN-MM-<english-name>/` con tres ficheros: `specNN-MM.md` (requisitos y decisiones), `planNN-MM.md` (plan aprobado) y `taskNN-MM.md` (tareas con casillas). Al implementarla se vuelca el resultado en la spec base.
+- **Specs y features**: cada spec vive en `FINANCEAPP/doc/specs/specNN-<nombre>/specNN.md`. Una funcionalidad nueva o un cambio importante se documenta como feature en `FINANCEAPP/doc/specs/specNN-<nombre>/specNN-MM-<english-name>/` con tres ficheros: `specNN-MM.md` (requisitos y decisiones), `planNN-MM.md` (plan aprobado) y `taskNN-MM.md` (tareas con casillas). Al implementarla se vuelca el resultado en la spec base.
 - **Patrón de capas**: página `.razor` → `I*Service` → `AppDbContext`. Los servicios se registran `Scoped` en `MauiProgram.cs`. Toda lógica de negocio va en el servicio, no en la página.
 - **Patrón de UX por categoría**: listado de la entidad principal → formulario de alta/edición → operaciones desplegables bajo cada fila.
-- **Importes**: `decimal` con `[Column(TypeName = "decimal(18,2)")]` y formato `ToString("C")`.
+- **Importes**: `decimal` con `[Column(TypeName = "decimal(18,2)")]`. Se muestran con `CurrencyFormatter.Format(importe, divisa)` (símbolo de la divisa de la empresa u operación), no con `ToString("C")`, que depende de la cultura de Windows.
 - **Validación**: anotaciones de datos en el modelo (`[Required]`, `[Range]`, `[StringLength]`) con mensajes en español.
 - **Fines de línea y codificación**: los ficheros del proyecto usan **CRLF**; algunos llevan BOM. Respétalo al editar y no reformatees ficheros enteros.
 - **Archivos de referencia**:
@@ -84,18 +88,23 @@ dotnet restore FINANCEAPP.slnx
 - **Tipos de operación, estados y categorías son cadenas literales** (p. ej. `"Compra"`, `"Aportación"`, `"Traspaso Entrada"`, `"Vendida"`, `"Alquilado"`). Se comparan con `==`: respeta tildes y mayúsculas exactas.
 - **Los totales se guardan y se recalculan, no se calculan al leer**. Tras crear, editar o borrar una operación hay que llamar al recálculo del servicio correspondiente (empresa: `RecalculateTotalInvestedAsync`; banco: `RecalculateAccountBalanceAsync`; inmuebles: `RecalculatePropertyTotalsAsync`; refugio: `RecalculateAssetTotalAsync`). Los fondos no recalculan `TotalInvested` a partir de aportaciones y reembolsos: se introduce a mano.
 - **Acciones**: solo cuentan las operaciones **abiertas** (sin `CloseDate`) para inversión y número de acciones; los dividendos cuentan siempre. Las Ventas antiguas abiertas restan su importe completo. El valor de cartera usa `LivePrice ?? CurrentPrice`.
-- **Ventas de acciones nuevas** (`OperationService.RegisterSaleAsync`, SPEC-02-01): cierran por FIFO las compras y traspasos abiertos con la fecha de la venta, se cierran ellas mismas y guardan un registro en `SalesHistory`. Un lote parcial se divide en dos filas (cerrada y abierta duplicada) sin perder céntimos. El beneficio del histórico se guarda y solo se recalcula al editar el precio de venta. Borrar una Venta o un registro **no reabre** compras. Las ventas anteriores no se tocan. Las Ventas deben crearse siempre con `RegisterSaleAsync`, no con `AddAsync`.
+- **Ventas de acciones nuevas** (`OperationService.RegisterSaleAsync`, SPEC-02-01): cierran por FIFO las compras y traspasos abiertos con la fecha de la venta, se cierran ellas mismas y guardan un registro en `SalesHistory`. Un lote parcial se divide en dos filas (cerrada y abierta duplicada) sin perder céntimos. El beneficio del histórico se guarda y solo se recalcula al editar el precio de venta. Cada compra cerrada guarda `SaleHistoryId` y las filas de un lote partido comparten `OriginOperationId`. **Deshacer venta** (`OperationService.UndoSaleAsync`, desde `/sales-history`) reabre las compras, une las filas partidas, borra la Venta y el registro y recalcula; las operaciones cerradas por una venta no se editan ni borran desde `/operations` (`GetSaleLockMessageAsync`). Las ventas anteriores no se tocan. Las Ventas deben crearse siempre con `RegisterSaleAsync`, no con `AddAsync`.
 - **Importe de Compra y Venta** (SPEC-02-02): lo calcula `OperationAmountCalculator` (precio base × acciones + comisión; manda el precio por acción y, si no hay, el precio en vivo), es editable pero se recalcula al cambiar precio, acciones o comisión. Dividendo y Traspaso llevan el importe a mano. La fórmula no va en las páginas `.razor`. El precio de venta del histórico sigue la misma prioridad.
 - **Fondos**: el valor se actualiza **solo** con el historial de valores (`UpdateFundValueWithHistoryAsync`). No reintroducir operaciones de tipo Plusvalía; los métodos de la antigua opción A siguen en el servicio sin uso.
 - **Dashboard**: `SafeHavenInitialTotal` = total invertido y `SafeHavenTotal` = valor actual (mismo criterio que acciones y fondos). Los inmuebles entran por `CurrentValue ?? TotalInvested` y solo los no vendidos. El rendimiento de acciones usa `TotalInvestedValue`.
 - **Eliminar una empresa es en cascada** (operaciones + histórico de cotización) y definitivo. Eliminar fondo, cuenta, activo refugio o inmueble también borra sus operaciones.
 - **SQLite no admite transacciones anidadas**: los métodos de recálculo se llaman dentro de transacciones ya abiertas y no deben abrir otra.
 - **Esquema de BD**: `EnsureCreated()` solo crea la BD si no existe; **no aplica cambios a una BD existente**. Cualquier columna o tabla nueva (p. ej. `SalesHistory`) debe añadirse en `DatabaseSchemaUpgrader` (con `IF NOT EXISTS` / comprobación `PRAGMA table_info`) y llamarse desde `MauiProgram`. Cambiar solo el modelo rompe las BD ya creadas.
+- **Logo de la app** (SPEC-20-01): se sube en `/settings` (`Settings.razor`), `logoTools.js` lo recorta y lo reduce a PNG de 640 px y `AppSettingsService` lo guarda en `AppSettings` (clave `AppLogo`) con caché en memoria y evento `LogoChanged`. Se pinta solo con el componente `AppLogo` (variantes `sidebar`, `hero`, `compact`) en el menú, Inicio y Dashboard; sin logo se ve la marca de siempre. Los estilos `.app-logo*` están en `app.css`.
 - **Datos semilla**: `HasData` carga empresas de ejemplo (MSFT, AAPL, KO, JNJ, PG) y operaciones solo al crear una BD nueva.
 - **Yahoo Finance**: exige cabecera `User-Agent`; timeout de 10 s; los tickers europeos sin sufijo se resuelven probando `.MC`, `.PA`, `.MI`, `.DE`, `.AS`, `.BR`, `.L`, `.LS`, `.SW`. La actualización masiva es secuencial y manual. La caché de histórico dura 12 h.
 - **CDN**: ApexCharts e iconos se cargan por red; sin conexión, el gráfico y los iconos no aparecen.
+- **Gráfico de cotización** (SPEC-05-01): `CompanyChartModal` usa el **mismo `DbContext`** que el resto de la app y serializa sus accesos con un `SemaphoreSlim`; al cerrarse espera a que termine la consulta en curso. **No crear un `DbContext` aparte en un componente**: el contexto principal se queda con copias antiguas de las entidades y luego EF no guarda cambios sobre ellas (pasó con una venta desde el gráfico que, al deshacerla, no reabrió las compras). Las Compras y Ventas desde el gráfico pasan por `OperationService.RegisterQuickTradeAsync` (no por `AddAsync` directo): revalida el bloqueo por mercado (solo con fecha de hoy y mercado Cerrado) y llama a `AddAsync` o `RegisterSaleAsync`. Las capas opcionales se guardan en `AppSettings` (`CompanyChart.*`).
 - **Ruta de la BD** (`FileSystem.AppDataDirectory/financeapp.db`): en Windows sin empaquetar es `C:\Users\Mr X\AppData\Local\User Name\com.companyname.financeapp\Data\financeapp.db`. No usar la copia del `bin/`.
 - **Datos reales**: la BD del usuario contiene sus finanzas reales. Cualquier prueba debe hacerse sobre una copia.
+- **Tipos de cambio** (`ExchangeRates`): la clave incluye la divisa base, así que cambiar el país base deja las empresas sin tipo hasta actualizar. Los totales usan siempre el tipo actual; el tipo guardado en `Operations` solo sirve para «Detalles». Los pares de Yahoo son `XXXYYY=X` y pueden fallar: siempre hay que poder escribirlo a mano.
+- **Catálogo de mercado** (`MarketCompanies`): solo lectura para el usuario; se carga desde `Data/MarketCatalogData.cs` en `EnsureMarketCatalogTable` al cambiar `Version`. Para cambiarlo, edita ese fichero y sube la versión. Yahoo no es accesible desde la nube: los tickers se comprueban en la app.
+- **Capturas del patrimonio** (`WealthSnapshots`, SPEC-17-01): una por año y mes (índice único); solo se puede capturar el mes en curso o el anterior. Los importes salen de `IDashboardService.GetDashboardSummaryAsync` y son una **foto**: no se recalculan nunca (sustituir o borrar son las únicas formas de cambiarlos). El banco no tiene invertido y no entra en `TotalInvested`. Las variaciones se calculan al leer y no comparan capturas de distinta divisa base. Si cambia la fórmula del patrimonio del Dashboard, las capturas antiguas no cambian.
 - `FinancialRecord` / `IFinancialService` son **legado** de la v1; no ampliar.
 
 ## Forma de trabajar
@@ -103,7 +112,7 @@ dotnet restore FINANCEAPP.slnx
 - **Planifica antes de tocar código** cuando el cambio afecte a más de un servicio, al modelo de datos, al esquema de BD o a cálculos de dinero. Resume el plan en pocas líneas y espera conformidad si hay alternativas razonables.
 - **Funcionalidad nueva**: antes de tocar código, crea la carpeta de la feature con su spec, plan y tareas, y espera la aprobación del usuario. Marca las casillas de `taskNN-MM.md` según avances.
 - **Cambios pequeños y enfocados**: una funcionalidad o corrección por cambio; no mezcles refactors con arreglos.
-- **Lee antes de editar**: abre el servicio, la página y la spec relacionada (`FINANCEAPP/doc/specs/specNN/specNN.md`) antes de modificar.
+- **Lee antes de editar**: abre el servicio, la página y la spec relacionada (`FINANCEAPP/doc/specs/specNN-<nombre>/specNN.md`) antes de modificar.
 - **Actualiza la documentación** cuando cambies un comportamiento: la spec afectada (reglas de negocio, criterios de aceptación, observaciones) y, si cambia la estructura, `FINANCEAPP/doc/README.md`.
 - **Al terminar**, explica en español y de forma breve: qué cambiaste y por qué, qué ficheros tocaste, qué no pudiste verificar y qué debe probar el usuario.
 - Si no puedes compilar (entorno sin SDK/MAUI), dilo claramente: no afirmes que el cambio funciona.
@@ -123,6 +132,7 @@ dotnet restore FINANCEAPP.slnx
   - Recalcular totales tras modificar operaciones.
   - Respetar CRLF/BOM y el estilo del fichero que editas.
   - Usar transacciones en operaciones que tocan varias tablas.
+  - Enviar un documento a la IA solo tras la confirmación del usuario en esa acción, y guardar la clave de API únicamente en `SecureStorage`.
   - Indicar qué se ha verificado y qué no.
   - Actualizar `MEMORY.md` al terminar cada tarea.
 - ⚠️ **Pregunta antes de**:
@@ -137,6 +147,7 @@ dotnet restore FINANCEAPP.slnx
   - Borrar, sobrescribir o ejecutar scripts destructivos sobre `financeapp.db` ni sobre `Backups/` (incluido `RecreateDatabase.ps1`).
   - Subir a git la BD real, secretos o datos personales; guardar claves, tokens o datos personales en `MEMORY.md`; ni editar `bin/`, `obj/`, `.vs/` o `.git/`.
   - Usar `EnsureDeleted()` o migraciones destructivas.
+  - Guardar la clave de API de Claude en la base de datos, en copias de seguridad o en registros, ni mostrarla completa en pantalla.
   - Hacer commit o push sin que el usuario lo pida.
   - Tocar `Platforms/` o la configuración de firma/publicación sin indicación expresa.
   - Presentar como probado un cambio que no se ha compilado ni ejecutado.
@@ -154,6 +165,6 @@ No hay pruebas automáticas, así que la verificación es compilar y comprobar a
    - **Inmuebles**: ingreso y gasto; venta desde `/inmuebles/vender/{id}` (el inmueble pasa a Vendida y sale del patrimonio).
    - **Dashboard**: el patrimonio total coincide con la suma de las tarjetas; alertas, rendimiento, flujo de caja y operaciones recientes se muestran.
 3. **Si tocaste el esquema**, arranca con una BD ya existente (no una nueva) y comprueba que no se pierden datos y que la columna o tabla nueva aparece.
-4. **Contrasta con la spec** correspondiente en `FINANCEAPP/doc/specs/specNN/`: cada una tiene criterios de aceptación en casillas marcables; recórrelos.
+4. **Contrasta con la spec** correspondiente en `FINANCEAPP/doc/specs/specNN-<nombre>/`: cada una tiene criterios de aceptación en casillas marcables; recórrelos.
 5. **Revisa el diff** (`git diff`): solo los ficheros previstos, sin cambios de fines de línea masivos.
 6. Resume al usuario lo verificado y lo pendiente de probar en su máquina.

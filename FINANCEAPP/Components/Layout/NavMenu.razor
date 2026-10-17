@@ -1,8 +1,12 @@
 ﻿<div class="brand-row">
-    <a class="brand" href="">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <span class="brand-name">FINANCEAPP</span>
-    </a>
+    <AppLogo Variant="sidebar" Href="">
+        <NoLogo>
+            <a class="brand" href="">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span class="brand-name">FINANCEAPP</span>
+            </a>
+        </NoLogo>
+    </AppLogo>
 </div>
 
 <input type="checkbox" title="Menú de navegación" class="navbar-toggler" />
@@ -46,10 +50,22 @@
                 <i class="bi bi-bank" aria-hidden="true"></i> Cuentas Bancarias
             </NavLink>
         </div>
+        <p class="nav-section">Análisis</p>
+        <div class="nav-item">
+            <NavLink class="nav-link" href="history">
+                <i class="bi bi-clock-history" aria-hidden="true"></i> Histórico
+            </NavLink>
+        </div>
         <p class="nav-section">Legado</p>
         <div class="nav-item">
             <NavLink class="nav-link" href="operations">
                 <i class="bi bi-list-ul" aria-hidden="true"></i> Operaciones Acciones
+            </NavLink>
+        </div>
+        <p class="nav-section">Sistema</p>
+        <div class="nav-item">
+            <NavLink class="nav-link" href="settings">
+                <i class="bi bi-gear" aria-hidden="true"></i> Configuración
             </NavLink>
         </div>
     </nav>

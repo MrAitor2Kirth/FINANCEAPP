@@ -1,0 +1,600 @@
+@* Documentos adjuntos de un inmueble (SPEC-14-01): recibos y facturas.
+   Subir y guardar funciona siempre; la lectura con IA es opcional y solo se hace tras confirmar. *@
+@using System.Globalization
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.Extensions.Logging
+@inject IPropertyDocumentService DocumentService
+@inject IClaudeDocumentReader DocumentReader
+@inject IClaudeApiKeyStore ApiKeyStore
+@inject IPropertyService PropertyService
+@inject ILogger<PropertyDocumentsPanel> Logger
+
+<div class="mt-4">
+    <h6 class="mb-2"><i class="bi bi-paperclip me-1" aria-hidden="true"></i>Documentos</h6>
+
+    <div class="row g-2 align-items-end mb-2">
+        <div class="col-md-5">
+            <InputFile class="form-control form-control-sm" OnChange="OnFileSelected" disabled="@isBusy" />
+        </div>
+        <div class="col-md-5">
+            <input type="text" class="form-control form-control-sm" maxlength="200"
+                   placeholder="Descripción (opcional)" @bind="newDescription" disabled="@isBusy" />
+        </div>
+    </div>
+    <small class="text-muted d-block mb-2">Cualquier archivo hasta 10 MB (no se admiten ejecutables). Los datos se guardan en tu base de datos.</small>
+
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="alert @(messageIsError ? "alert-danger" : "alert-success") py-1 px-2"><small>@message</small></div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="text-muted small">Cargando documentos...</div>
+    }
+    else if (documents.Count == 0)
+    {
+        <div class="text-muted small">Este inmueble no tiene documentos.</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle">
+                <thead>
+                    <tr>
+                        <th>Archivo</th>
+                        <th>Descripción</th>
+                        <th class="text-end">Tamaño</th>
+                        <th>Subido</th>
+                        <th>Datos leídos</th>
+                        <th>Estado</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var doc in documents)
+                    {
+                        <tr>
+                            <td>@doc.FileName</td>
+                            <td>@doc.Description</td>
+                            <td class="text-end">@FormatSize(doc.SizeBytes)</td>
+                            <td>@doc.UploadedAt.ToString("dd/MM/yyyy")</td>
+                            <td>
+                                @if (HasData(doc))
+                                {
+                                    <small>
+                                        @(doc.ExtractedCompany ?? "—") ·
+                                        @(doc.ExtractedAmount.HasValue ? doc.ExtractedAmount.Value.ToString("N2", CultureInfo.CurrentCulture) : "—") ·
+                                        @(doc.ExtractedDate.HasValue ? doc.ExtractedDate.Value.ToString("dd/MM/yyyy") : "—") ·
+                                        @(doc.ExtractedType ?? "—")
+                                    </small>
+                                }
+                            </td>
+                            <td>
+                                @if (doc.PropertyOperationId.HasValue)
+                                {
+                                    <span class="badge bg-success">Gasto creado</span>
+                                }
+                                else if (doc.AiReadAt.HasValue)
+                                {
+                                    <span class="badge bg-info">Leído</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Sin leer</span>
+                                }
+                            </td>
+                            <td class="text-nowrap">
+                                <button class="btn btn-sm btn-outline-primary" disabled="@isBusy" @onclick="() => OpenDocument(doc.Id)">Abrir</button>
+                                <button class="btn btn-sm btn-outline-secondary" disabled="@(isBusy || !CanReadWithAi(doc))"
+                                        title="@ReadDisabledReason(doc)" @onclick="() => AskRead(doc)">Leer con IA</button>
+                                <button class="btn btn-sm btn-outline-secondary" disabled="@isBusy" @onclick="() => StartEdit(doc)">Datos</button>
+                                @if (!doc.PropertyOperationId.HasValue)
+                                {
+                                    <button class="btn btn-sm btn-outline-success" disabled="@isBusy" @onclick="() => StartExpense(doc)">Crear gasto</button>
+                                }
+                                <button class="btn btn-sm btn-outline-danger" disabled="@isBusy" @onclick="() => AskDelete(doc)">Eliminar</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <small class="text-muted">@documents.Count documento(s) · @FormatSize(totalSize)</small>
+        @if (!hasApiKey)
+        {
+            <small class="text-muted d-block">Para leer facturas con IA añade tu clave de API en Configuración.</small>
+        }
+    }
+</div>
+
+@if (modal == Modal.ConfirmRead && target != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Leer con IA</h5>
+                    <button type="button" class="btn-close" aria-label="Cerrar" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Se enviará el documento <strong>@target.FileName</strong> a Anthropic (servicio externo en internet) para leer la empresa, el importe, la fecha y el tipo.</p>
+                    <p class="mb-0">El uso se factura a tu clave de API. Si no quieres enviarlo, cancela y rellena los datos a mano.</p>
+                    @if (HasData(target))
+                    {
+                        <div class="alert alert-warning mt-3 mb-0 py-1 px-2"><small>Este documento ya tiene datos leídos: se sustituirán por los nuevos.</small></div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModal">Cancelar</button>
+                    <button class="btn btn-primary" @onclick="ConfirmRead">Enviar y leer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (modal == Modal.ConfirmDelete && target != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Eliminar documento</h5>
+                    <button type="button" class="btn-close" aria-label="Cerrar" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">¿Eliminar <strong>@target.FileName</strong>? No se podrá recuperar.@(target.PropertyOperationId.HasValue ? " El gasto creado a partir de él no se borra." : "")</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModal">Cancelar</button>
+                    <button class="btn btn-danger" @onclick="ConfirmDelete">Eliminar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (modal == Modal.EditData && target != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Datos del documento</h5>
+                    <button type="button" class="btn-close" aria-label="Cerrar" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label">Empresa</label>
+                        <input type="text" class="form-control" maxlength="200" @bind="editCompany" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Importe</label>
+                        <input type="number" step="0.01" class="form-control" @bind="editAmount" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Fecha</label>
+                        <input type="date" class="form-control" @bind="editDate" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Tipo de gasto</label>
+                        <select class="form-select" @bind="editType">
+                            <option value="">Sin tipo</option>
+                            @foreach (var t in ExpenseTypes)
+                            {
+                                <option value="@t.Value">@t.Label</option>
+                            }
+                        </select>
+                    </div>
+                    @if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger py-1 px-2 mb-0"><small>@modalError</small></div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModal">Cancelar</button>
+                    <button class="btn btn-primary" @onclick="SaveEdit">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (modal == Modal.CreateExpense && target != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Crear gasto</h5>
+                    <button type="button" class="btn-close" aria-label="Cerrar" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">Se creará un gasto en <strong>@PropertyName</strong> y quedará enlazado a <strong>@target.FileName</strong>.</p>
+                    <div class="mb-2">
+                        <label class="form-label">Tipo de gasto</label>
+                        <select class="form-select" @bind="editType">
+                            <option value="">Seleccionar tipo...</option>
+                            @foreach (var t in ExpenseTypes)
+                            {
+                                <option value="@t.Value">@t.Label</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Importe</label>
+                        <input type="number" step="0.01" class="form-control" @bind="editAmount" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Fecha</label>
+                        <input type="date" class="form-control" @bind="editDate" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Descripción</label>
+                        <input type="text" class="form-control" maxlength="500" @bind="editDescription" />
+                    </div>
+                    @if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger py-1 px-2 mb-0"><small>@modalError</small></div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModal">Cancelar</button>
+                    <button class="btn btn-success" disabled="@isBusy" @onclick="ConfirmExpense">Crear gasto</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int PropertyId { get; set; }
+
+    [Parameter]
+    public string PropertyName { get; set; } = string.Empty;
+
+    /// <summary>Se invoca tras crear un gasto para que la pantalla refresque operaciones y totales</summary>
+    [Parameter]
+    public EventCallback OnExpenseCreated { get; set; }
+
+    private enum Modal { None, ConfirmRead, ConfirmDelete, EditData, CreateExpense }
+
+    private sealed record ExpenseTypeOption(string Value, string Label);
+
+    private static readonly ExpenseTypeOption[] ExpenseTypes =
+    {
+        new("Comunidad", "Comunidad"),
+        new("IBI", "IBI"),
+        new("Hipoteca", "Hipoteca"),
+        new("Reforma", "Reforma"),
+        new("Seguro", "Seguro"),
+        new("Servicios", "Servicios (Agua, Luz, Gas)")
+    };
+
+    private List<PropertyDocumentInfo> documents = new();
+    private long totalSize;
+    private bool isLoading = true;
+    private bool isBusy;
+    private bool hasApiKey;
+    private string newDescription = string.Empty;
+    private string message = string.Empty;
+    private bool messageIsError;
+
+    private Modal modal = Modal.None;
+    private PropertyDocumentInfo? target;
+    private string modalError = string.Empty;
+    private string editCompany = string.Empty;
+    private decimal? editAmount;
+    private DateTime? editDate;
+    private string editType = string.Empty;
+    private string editDescription = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        documents = await DocumentService.GetByPropertyAsync(PropertyId);
+        totalSize = await DocumentService.GetTotalSizeAsync(PropertyId);
+        hasApiKey = await ApiKeyStore.HasKeyAsync();
+        isLoading = false;
+    }
+
+    private void ShowMessage(string text, bool isError)
+    {
+        message = text;
+        messageIsError = isError;
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null)
+        {
+            return;
+        }
+
+        message = string.Empty;
+        isBusy = true;
+        try
+        {
+            if (file.Size > IPropertyDocumentService.MaxFileSize)
+            {
+                ShowMessage("El archivo supera el tamaño máximo de 10 MB.", true);
+                return;
+            }
+
+            using var memory = new MemoryStream();
+            await using (var stream = file.OpenReadStream(IPropertyDocumentService.MaxFileSize))
+            {
+                await stream.CopyToAsync(memory);
+            }
+
+            var result = await DocumentService.AddAsync(PropertyId, file.Name, file.ContentType, memory.ToArray(), newDescription);
+            if (result.Success)
+            {
+                newDescription = string.Empty;
+                ShowMessage($"Documento «{file.Name}» guardado.", false);
+                await LoadAsync();
+            }
+            else
+            {
+                ShowMessage(result.ErrorMessage, true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al subir documento");
+            ShowMessage("No se pudo leer el archivo seleccionado.", true);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task OpenDocument(int id)
+    {
+        message = string.Empty;
+        isBusy = true;
+        try
+        {
+            var result = await DocumentService.OpenAsync(id);
+            if (!result.Success)
+            {
+                ShowMessage(result.ErrorMessage, true);
+            }
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private static bool HasData(PropertyDocumentInfo d) =>
+        d.ExtractedCompany != null || d.ExtractedAmount.HasValue || d.ExtractedDate.HasValue || d.ExtractedType != null;
+
+    private bool CanReadWithAi(PropertyDocumentInfo d) => hasApiKey && DocumentReader.CanRead(d.ContentType);
+
+    private string ReadDisabledReason(PropertyDocumentInfo d)
+    {
+        if (!DocumentReader.CanRead(d.ContentType))
+        {
+            return "Solo se pueden leer imágenes (JPG, PNG, GIF, WebP) y PDF.";
+        }
+
+        return hasApiKey ? "Leer con IA" : "Añade tu clave de API en Configuración para activar la lectura con IA.";
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024)
+        {
+            return $"{bytes / 1024d / 1024d:0.0} MB";
+        }
+
+        return bytes >= 1024 ? $"{bytes / 1024d:0} KB" : $"{bytes} B";
+    }
+
+    private void CloseModal()
+    {
+        modal = Modal.None;
+        target = null;
+        modalError = string.Empty;
+    }
+
+    private void AskRead(PropertyDocumentInfo doc)
+    {
+        target = doc;
+        modal = Modal.ConfirmRead;
+    }
+
+    private async Task ConfirmRead()
+    {
+        var doc = target;
+        CloseModal();
+        if (doc == null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        message = string.Empty;
+        ShowMessage("Leyendo el documento con IA...", false);
+        StateHasChanged();
+        try
+        {
+            var content = await DocumentService.GetContentAsync(doc.Id);
+            if (content == null)
+            {
+                ShowMessage("El documento ya no existe.", true);
+                return;
+            }
+
+            var result = await DocumentReader.ReadAsync(content, doc.ContentType);
+            if (!result.Success)
+            {
+                ShowMessage(result.ErrorMessage, true);
+                return;
+            }
+
+            var saved = await DocumentService.UpdateExtractedDataAsync(doc.Id, result.Company, result.Amount, result.Date, result.Type, markAiRead: true);
+            if (!saved.Success)
+            {
+                ShowMessage(saved.ErrorMessage, true);
+                return;
+            }
+
+            await LoadAsync();
+            if (!string.IsNullOrEmpty(result.Warning))
+            {
+                ShowMessage(result.Warning, true);
+            }
+            else
+            {
+                ShowMessage("Documento leído. Revisa los datos antes de crear el gasto.", false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al leer documento con IA");
+            ShowMessage("No se pudo leer el documento con IA.", true);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void AskDelete(PropertyDocumentInfo doc)
+    {
+        target = doc;
+        modal = Modal.ConfirmDelete;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        var doc = target;
+        CloseModal();
+        if (doc == null)
+        {
+            return;
+        }
+
+        var result = await DocumentService.DeleteAsync(doc.Id);
+        ShowMessage(result.Success ? $"Documento «{doc.FileName}» eliminado." : result.ErrorMessage, !result.Success);
+        await LoadAsync();
+    }
+
+    private void StartEdit(PropertyDocumentInfo doc)
+    {
+        target = doc;
+        editCompany = doc.ExtractedCompany ?? string.Empty;
+        editAmount = doc.ExtractedAmount;
+        editDate = doc.ExtractedDate;
+        editType = doc.ExtractedType ?? string.Empty;
+        modalError = string.Empty;
+        modal = Modal.EditData;
+    }
+
+    private async Task SaveEdit()
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        var result = await DocumentService.UpdateExtractedDataAsync(target.Id, editCompany, editAmount, editDate, editType, markAiRead: false);
+        if (!result.Success)
+        {
+            modalError = result.ErrorMessage;
+            return;
+        }
+
+        CloseModal();
+        ShowMessage("Datos guardados.", false);
+        await LoadAsync();
+    }
+
+    private void StartExpense(PropertyDocumentInfo doc)
+    {
+        target = doc;
+        editType = doc.ExtractedType ?? string.Empty;
+        editAmount = doc.ExtractedAmount;
+        editDate = doc.ExtractedDate ?? DateTime.Today;
+        editDescription = string.IsNullOrWhiteSpace(doc.ExtractedCompany)
+            ? doc.FileName
+            : $"{doc.ExtractedCompany} - {doc.FileName}";
+        if (editDescription.Length > 500)
+        {
+            editDescription = editDescription[..500];
+        }
+
+        modalError = string.Empty;
+        modal = Modal.CreateExpense;
+    }
+
+    private async Task ConfirmExpense()
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(editType))
+        {
+            modalError = "Selecciona un tipo de gasto.";
+            return;
+        }
+
+        if (!editAmount.HasValue || editAmount.Value <= 0)
+        {
+            modalError = "El importe debe ser mayor que 0.";
+            return;
+        }
+
+        if (!editDate.HasValue)
+        {
+            modalError = "La fecha es obligatoria.";
+            return;
+        }
+
+        var doc = target;
+        isBusy = true;
+        try
+        {
+            var operation = await PropertyService.CreateOperationAsync(new PropertyOperation
+            {
+                PropertyName = PropertyName,
+                Category = "Gasto",
+                Type = editType,
+                Amount = Math.Round(editAmount.Value, 2),
+                Date = editDate.Value,
+                Description = string.IsNullOrWhiteSpace(editDescription) ? null : editDescription.Trim()
+            });
+
+            var link = await DocumentService.LinkOperationAsync(doc.Id, operation.Id);
+            CloseModal();
+            ShowMessage(link.Success
+                ? "Gasto creado y enlazado al documento."
+                : "El gasto se creó, pero no se pudo enlazar con el documento.", !link.Success);
+            await LoadAsync();
+            await OnExpenseCreated.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al crear gasto desde documento");
+            modalError = "No se pudo crear el gasto. No se ha modificado ningún dato.";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+}

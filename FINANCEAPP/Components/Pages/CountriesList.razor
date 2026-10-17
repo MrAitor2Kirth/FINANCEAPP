@@ -1,0 +1,338 @@
+@page "/settings/countries"
+@inject ICountryService CountryService
+@inject IAppSettingsService AppSettings
+
+<PageTitle>Países</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="page-head">
+        <div>
+            <h1 class="sw" style="--swatch:var(--ink-soft)">
+                <i class="bi bi-globe-europe-africa me-2" aria-hidden="true"></i>
+                Países
+            </h1>
+            <p class="page-sub">Catálogo de países con su región y divisa. Cada empresa elige uno.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="/settings" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left me-1" aria-hidden="true"></i> Volver a Configuración
+            </a>
+            <button type="button" class="btn btn-primary" @onclick="StartCreate" disabled="@(isBusy || formMode != FormMode.None)">
+                <i class="bi bi-plus-circle me-1" aria-hidden="true"></i> Nuevo país
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger d-flex align-items-center justify-content-between" role="alert">
+            <div><i class="bi bi-exclamation-triangle-fill me-2" aria-hidden="true"></i>@errorMessage</div>
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="ClearMessages"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-info d-flex align-items-center justify-content-between" role="status">
+            <div><i class="bi bi-info-circle-fill me-2" aria-hidden="true"></i>@infoMessage</div>
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="ClearMessages"></button>
+        </div>
+    }
+
+    @if (formMode != FormMode.None)
+    {
+        <section class="card mb-4" aria-labelledby="country-form-title">
+            <div class="card-body">
+                <h2 class="h5" id="country-form-title">@(formMode == FormMode.Create ? "Nuevo país" : "Editar país")</h2>
+                <div class="row g-3">
+                    <div class="col-md-2">
+                        <label for="country-code" class="form-label">Código <span class="text-danger">*</span></label>
+                        <input id="country-code" class="form-control text-uppercase" maxlength="3"
+                               @bind="form.Code" @bind:event="oninput"
+                               readonly="@(formMode == FormMode.Edit)"
+                               title="@(formMode == FormMode.Edit ? "El código no se puede cambiar" : "2 o 3 letras")" />
+                    </div>
+                    <div class="col-md-4">
+                        <label for="country-name" class="form-label">Nombre <span class="text-danger">*</span></label>
+                        <input id="country-name" class="form-control" maxlength="100"
+                               @bind="form.Name" @bind:event="oninput" />
+                    </div>
+                    <div class="col-md-3">
+                        <label for="country-region" class="form-label">Región <span class="text-danger">*</span></label>
+                        <select id="country-region" class="form-select" @bind="form.Region">
+                            <option value="">-- Seleccione --</option>
+                            <option value="EU">Europa (EU)</option>
+                            <option value="ASIA">Asia</option>
+                            <option value="AMERICA">América</option>
+                            <option value="SUDAMERICA">Sudamérica</option>
+                            <option value="OTRAS">Otras (África, Oceanía y resto)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="country-currency" class="form-label">Divisa <span class="text-danger">*</span></label>
+                        <input id="country-currency" class="form-control text-uppercase" maxlength="3"
+                               placeholder="EUR, USD, GBP..."
+                               @bind="form.CurrencyCode" @bind:event="oninput" />
+                    </div>
+                </div>
+                <div class="d-flex gap-2 mt-3">
+                    <button type="button" class="btn btn-success" @onclick="Save" disabled="@isBusy">
+                        <i class="bi bi-check-lg me-1" aria-hidden="true"></i> Guardar
+                    </button>
+                    <button type="button" class="btn btn-secondary" @onclick="CancelForm" disabled="@isBusy">Cancelar</button>
+                </div>
+            </div>
+        </section>
+    }
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+        </div>
+    }
+    else if (countries.Count == 0)
+    {
+        <div class="alert alert-info" role="alert">
+            No hay países en el catálogo. Pulsa «Nuevo país» para añadir el primero.
+        </div>
+    }
+    else
+    {
+        <div class="card shadow-sm">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th scope="col" style="width: 100px;">Código</th>
+                                <th scope="col">Nombre</th>
+                                <th scope="col" style="width: 160px;">Región</th>
+                                <th scope="col" style="width: 140px;">Divisa</th>
+                                <th scope="col" style="width: 120px;" class="text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var country in countries)
+                            {
+                                <tr>
+                                    <td class="align-middle"><strong>@country.Code</strong></td>
+                                    <td class="align-middle">
+                                        @country.Name
+                                        @if (string.Equals(country.Code, baseCountryCode, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <span class="badge bg-primary ms-1">País base</span>
+                                        }
+                                    </td>
+                                    <td class="align-middle">@RegionLabel(country.Region)</td>
+                                    <td class="align-middle">@CurrencyFormatter.Label(country.CurrencyCode)</td>
+                                    <td class="text-center align-middle">
+                                        <div class="btn-group-sm d-flex gap-1 justify-content-center" role="group">
+                                            <button type="button" class="btn btn-warning btn-sm" title="Editar"
+                                                    @onclick="() => StartEdit(country)" disabled="@(isBusy || formMode != FormMode.None)">
+                                                <i class="bi bi-pencil-fill"></i>
+                                            </button>
+                                            <button type="button" class="btn btn-danger btn-sm" title="Eliminar"
+                                                    @onclick="() => AskDelete(country)" disabled="@(isBusy || formMode != FormMode.None)">
+                                                <i class="bi bi-trash-fill"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Modal de confirmación de eliminación -->
+<div class="modal fade @(countryToDelete != null ? "show d-block" : "")"
+     tabindex="-1"
+     style="@(countryToDelete != null ? "background-color: rgba(0,0,0,0.5);" : "")">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2" aria-hidden="true"></i>
+                    Eliminar país
+                </h5>
+                <button type="button" class="btn-close btn-close-white" aria-label="Cerrar" @onclick="CancelDelete"></button>
+            </div>
+            <div class="modal-body">
+                @if (countryToDelete != null)
+                {
+                    <p class="mb-0">¿Eliminar <strong>@countryToDelete.Name (@countryToDelete.Code)</strong> del catálogo?</p>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @onclick="CancelDelete" disabled="@isBusy">Cancelar</button>
+                <button type="button" class="btn btn-danger" @onclick="ConfirmDelete" disabled="@isBusy">
+                    <i class="bi bi-trash me-1" aria-hidden="true"></i> Eliminar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private enum FormMode { None, Create, Edit }
+
+    private List<Country> countries = new();
+    private string baseCountryCode = string.Empty;
+    private bool isLoading = true;
+    private bool isBusy;
+    private string? errorMessage;
+    private string? infoMessage;
+
+    private FormMode formMode = FormMode.None;
+    private Country form = new();
+    private Country? countryToDelete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCountries();
+    }
+
+    private async Task LoadCountries()
+    {
+        try
+        {
+            isLoading = true;
+            countries = await CountryService.GetAllAsync();
+            baseCountryCode = await AppSettings.GetBaseCountryCodeAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al cargar los países: {ex.Message}");
+            errorMessage = "No se pudo cargar el catálogo de países.";
+            countries = new List<Country>();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private static string RegionLabel(string region) => region switch
+    {
+        "EU" => "Europa",
+        "ASIA" => "Asia",
+        "AMERICA" => "América",
+        "SUDAMERICA" => "Sudamérica",
+        "OTRAS" => "Otras",
+        _ => region
+    };
+
+    private void ClearMessages()
+    {
+        errorMessage = null;
+        infoMessage = null;
+    }
+
+    private void StartCreate()
+    {
+        ClearMessages();
+        form = new Country { Region = string.Empty, CurrencyCode = string.Empty };
+        formMode = FormMode.Create;
+    }
+
+    private void StartEdit(Country country)
+    {
+        ClearMessages();
+        form = new Country
+        {
+            Code = country.Code,
+            Name = country.Name,
+            Region = country.Region,
+            CurrencyCode = country.CurrencyCode
+        };
+        formMode = FormMode.Edit;
+    }
+
+    private void CancelForm()
+    {
+        formMode = FormMode.None;
+        form = new Country();
+    }
+
+    private async Task Save()
+    {
+        if (isBusy)
+        {
+            return;
+        }
+
+        ClearMessages();
+        isBusy = true;
+        try
+        {
+            // Código y divisa siempre en mayúsculas
+            form.Code = (form.Code ?? string.Empty).Trim().ToUpperInvariant();
+            form.CurrencyCode = (form.CurrencyCode ?? string.Empty).Trim().ToUpperInvariant();
+
+            var result = formMode == FormMode.Create
+                ? await CountryService.CreateAsync(form)
+                : await CountryService.UpdateAsync(form);
+
+            if (result.Success)
+            {
+                infoMessage = formMode == FormMode.Create ? "País creado." : "País actualizado.";
+                formMode = FormMode.None;
+                form = new Country();
+                await LoadCountries();
+            }
+            else
+            {
+                errorMessage = result.ErrorMessage;
+            }
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void AskDelete(Country country)
+    {
+        ClearMessages();
+        countryToDelete = country;
+    }
+
+    private void CancelDelete()
+    {
+        countryToDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (countryToDelete == null || isBusy)
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var result = await CountryService.DeleteAsync(countryToDelete.Code);
+            countryToDelete = null;
+            if (result.Success)
+            {
+                infoMessage = "País eliminado.";
+                await LoadCountries();
+            }
+            else
+            {
+                errorMessage = result.ErrorMessage;
+            }
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+}

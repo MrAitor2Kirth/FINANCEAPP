@@ -27,7 +27,13 @@ namespace FINANCEAPP.Services
 
         public async Task<List<PriceHistoryPoint>> GetHistoryAsync(int companyId, string ticker, ChartGranularity granularity)
         {
-            await RefreshCacheIfNeededAsync(companyId, ticker);
+            var result = await GetHistoryWithStatusAsync(companyId, ticker, granularity, false);
+            return result.Points;
+        }
+
+        public async Task<PriceHistoryResult> GetHistoryWithStatusAsync(int companyId, string ticker, ChartGranularity granularity, bool forceRefresh)
+        {
+            var refreshFailed = await RefreshCacheIfNeededAsync(companyId, ticker, forceRefresh);
 
             var dailyPoints = await _context.PriceHistoryPoints
                 .AsNoTracking()
@@ -35,16 +41,22 @@ namespace FINANCEAPP.Services
                 .OrderBy(p => p.Date)
                 .ToListAsync();
 
-            return granularity switch
+            var points = granularity switch
             {
                 ChartGranularity.Daily => dailyPoints,
                 ChartGranularity.Monthly => Aggregate(dailyPoints, p => new DateTime(p.Date.Year, p.Date.Month, 1)),
                 ChartGranularity.Yearly => Aggregate(dailyPoints, p => new DateTime(p.Date.Year, 1, 1)),
                 _ => dailyPoints,
             };
+
+            return new PriceHistoryResult { Points = points, RefreshFailed = refreshFailed };
         }
 
-        private async Task RefreshCacheIfNeededAsync(int companyId, string ticker)
+        /// <summary>
+        /// Refresca la caché si está desactualizada o si se fuerza. Devuelve true si se intentó descargar
+        /// y Yahoo no devolvió datos.
+        /// </summary>
+        private async Task<bool> RefreshCacheIfNeededAsync(int companyId, string ticker, bool forceRefresh)
         {
             var latestFetch = await _context.PriceHistoryPoints
                 .AsNoTracking()
@@ -54,16 +66,16 @@ namespace FINANCEAPP.Services
                 .FirstOrDefaultAsync();
 
             var isFresh = latestFetch.HasValue && DateTime.Now - latestFetch.Value < CacheFreshness;
-            if (isFresh)
+            if (isFresh && !forceRefresh)
             {
-                return;
+                return false;
             }
 
             var bars = await _stockPriceService.GetDailyHistoryAsync(ticker, "5y");
             if (bars.Count == 0)
             {
                 // No se pudo obtener nada nuevo; se sigue sirviendo lo que hubiera en caché.
-                return;
+                return true;
             }
 
             var existingByDate = await _context.PriceHistoryPoints
@@ -100,6 +112,7 @@ namespace FINANCEAPP.Services
             }
 
             await _context.SaveChangesAsync();
+            return false;
         }
 
         private static List<PriceHistoryPoint> Aggregate(List<PriceHistoryPoint> dailyPoints, Func<PriceHistoryPoint, DateTime> bucketSelector)

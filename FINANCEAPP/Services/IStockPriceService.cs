@@ -15,5 +15,13 @@ namespace FINANCEAPP.Services
         /// <param name="range">Rango soportado por Yahoo Finance, p.ej. "5y", "1y", "max"</param>
         /// <returns>Lista de barras diarias ordenadas por fecha ascendente, o lista vacía si no se pudo obtener</returns>
         Task<List<StockHistoryBar>> GetDailyHistoryAsync(string ticker, string range = "5y");
+
+        /// <summary>
+        /// Obtiene la cotización en vivo de un ticker (último precio, cierre anterior, máximo y mínimo del día,
+        /// hora del precio y sesión regular) probando los sufijos de bolsa si hace falta (SPEC-05-01).
+        /// </summary>
+        /// <param name="ticker">Ticker de la empresa o símbolo ya resuelto (p. ej. ACS.MC)</param>
+        /// <returns>La cotización con el símbolo resuelto, o null si no se obtuvo precio</returns>
+        Task<StockQuote?> GetQuoteAsync(string ticker);
     }
 }

@@ -79,6 +79,47 @@ namespace FINANCEAPP.Models
         public DateTime CreatedAt { get; set; } = DateTime.Now;
 
         /// <summary>
+        /// Id del registro de SalesHistory que cerró esta compra o traspaso (sin clave foránea).
+        /// Vacío si está abierta o se cerró a mano. Se limpia al deshacer la venta.
+        /// </summary>
+        public int? SaleHistoryId { get; set; }
+
+        /// <summary>
+        /// Id de la fila original de un lote partido por una venta parcial (sin clave foránea).
+        /// Lo comparten todas las filas que salen del mismo lote; permite volver a unirlas al deshacer.
+        /// </summary>
+        public int? OriginOperationId { get; set; }
+
+        /// <summary>
+        /// Divisa de la operación (SPEC-01-02): la de la empresa cuando se registró. Nulo = EUR
+        /// (operaciones anteriores a la feature o de empresas sin país).
+        /// </summary>
+        [StringLength(3)]
+        [Display(Name = "Cód. divisa")]
+        public string? CurrencyCode { get; set; }
+
+        /// <summary>
+        /// Tipo de cambio guardado en la operación (SPEC-01-03): unidades de ExchangeRateTo por 1 unidad
+        /// de la divisa de la operación. Nulo en empresas de la divisa base y en operaciones sin tipo.
+        /// Solo se usa en «Detalles»; los totales usan el tipo actual.
+        /// </summary>
+        [Column(TypeName = "decimal(18,6)")]
+        [Display(Name = "Tipo de cambio")]
+        public decimal? ExchangeRate { get; set; }
+
+        /// <summary>
+        /// Divisa destino del tipo de cambio guardado (la divisa base cuando se guardó). Nulo si no hay tipo.
+        /// </summary>
+        [StringLength(3)]
+        public string? ExchangeRateTo { get; set; }
+
+        /// <summary>
+        /// Divisa efectiva de la operación (EUR si no tiene). No se mapea a la base de datos.
+        /// </summary>
+        [NotMapped]
+        public string EffectiveCurrencyCode => FINANCEAPP.Services.CurrencyFormatter.Normalize(CurrencyCode);
+
+        /// <summary>
         /// Propiedad calculada que indica si la operación está cerrada
         /// </summary>
         [NotMapped]

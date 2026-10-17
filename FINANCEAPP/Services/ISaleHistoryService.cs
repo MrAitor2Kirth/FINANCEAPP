@@ -25,7 +25,8 @@ namespace FINANCEAPP.Services
         Task<bool> UpdateSellPriceAsync(int id, decimal sellPrice);
 
         /// <summary>
-        /// Elimina un registro del histórico. No reabre las compras cerradas por esa venta.
+        /// Elimina un registro del histórico sin más. No reabre las compras cerradas por esa venta:
+        /// para deshacer una venta usa <see cref="IOperationService.UndoSaleAsync"/> (la página ya no llama a este método).
         /// </summary>
         Task<bool> DeleteAsync(int id);
     }

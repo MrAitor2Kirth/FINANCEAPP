@@ -134,6 +134,32 @@ namespace FINANCEAPP.Models
         public decimal TotalInvestedValue => (LivePrice ?? CurrentPrice) * NumberOfShares;
 
         /// <summary>
+        /// Precio medio de compra: total invertido inicial dividido entre el numero de acciones.
+        /// Es null cuando no hay acciones en cartera o el total invertido es cero o negativo.
+        /// No se mapea a la base de datos
+        /// </summary>
+        [NotMapped]
+        [Display(Name = "Precio Medio de Compra")]
+        public decimal? AveragePurchasePrice =>
+            NumberOfShares > 0 && TotalInvestedInitial > 0
+                ? TotalInvestedInitial / NumberOfShares
+                : null;
+
+        /// <summary>
+        /// Código del país de la empresa (SPEC-01-02). Nulo en empresas antiguas sin país.
+        /// </summary>
+        [StringLength(3)]
+        [Display(Name = "País")]
+        public string? CountryCode { get; set; }
+
+        /// <summary>
+        /// Divisa de la empresa, la de su país (EUR si no tiene país). Solo para la interfaz,
+        /// la rellena CompanyService; no se persiste.
+        /// </summary>
+        [NotMapped]
+        public string CurrencyCode { get; set; } = FINANCEAPP.Services.CurrencyFormatter.DefaultCurrency;
+
+        /// <summary>
         /// Propiedad calculada que devuelve la rentabilidad por plusval├¡a con formato de porcentaje.
         /// </summary>
         [NotMapped]
@@ -149,7 +175,7 @@ namespace FINANCEAPP.Models
         /// Propiedad calculada que devuelve el importe total de dividendos con formato monetario.
         /// </summary>
         [NotMapped]
-        public string FormattedTotalDividends => $"{TotalDividends:C2}";
+        public string FormattedTotalDividends => FINANCEAPP.Services.CurrencyFormatter.Format(TotalDividends, CurrencyCode);
 
         /// <summary>
         /// Calcula la rentabilidad por plusval├¡a para la empresa.

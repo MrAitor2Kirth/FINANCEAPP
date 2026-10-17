@@ -1,0 +1,236 @@
+@* Ventana de captura del patrimonio (SPEC-17-01). Se abre desde el Dashboard, /history y /history/wealth. *@
+@inject IWealthSnapshotService WealthSnapshotService
+@inject NavigationManager Navigation
+
+@if (isVisible)
+{
+    <div class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="wealth-capture-title" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="wealth-capture-title">
+                        <i class="bi bi-camera me-2" aria-hidden="true"></i> Capturar patrimonio
+                    </h5>
+                    <button type="button" class="btn-close" aria-label="Cerrar" @onclick="Close" disabled="@isSaving"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="wealth-capture-period">Periodo</label>
+                        <select id="wealth-capture-period" class="form-select" value="@selectedKey" @onchange="OnPeriodChanged" disabled="@isSaving">
+                            @foreach (var period in periods)
+                            {
+                                <option value="@period.Key">@period.Label</option>
+                            }
+                        </select>
+                        <div class="form-text">Los importes son siempre los de hoy, aunque elijas el mes anterior.</div>
+                    </div>
+
+                    @if (isLoading)
+                    {
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Calculando...</span></div>
+                        </div>
+                    }
+                    else if (preview != null)
+                    {
+                        var s = preview.Snapshot;
+                        <div class="capture-preview">
+                        @if (preview.ExistingCapturedAt.HasValue)
+                        {
+                            <div class="alert alert-warning" role="status">
+                                <i class="bi bi-arrow-repeat me-2" aria-hidden="true"></i>
+                                Ya existe la captura de @SelectedLabel (tomada el @preview.ExistingCapturedAt.Value.ToString("dd/MM/yyyy HH:mm")). Se sustituirá.
+                            </div>
+                        }
+
+                        @if (preview.HasWarnings)
+                        {
+                            <div class="alert alert-info" role="status">
+                                <p class="mb-1"><i class="bi bi-exclamation-circle me-2" aria-hidden="true"></i><strong>Puede que la foto no sea fiel:</strong></p>
+                                <ul class="mb-2">
+                                    @if (preview.StalePriceCompanies > 0)
+                                    {
+                                        <li>@preview.StalePriceCompanies @(preview.StalePriceCompanies == 1 ? "empresa con acciones tiene" : "empresas con acciones tienen") el precio en vivo sin actualizar o de hace más de 24 horas.</li>
+                                    }
+                                    @if (preview.MissingRateCompanies > 0)
+                                    {
+                                        <li>@preview.MissingRateCompanies @(preview.MissingRateCompanies == 1 ? "empresa en otra divisa no tiene" : "empresas en otra divisa no tienen") tipo de cambio y @(preview.MissingRateCompanies == 1 ? "queda" : "quedan") fuera del total.</li>
+                                    }
+                                </ul>
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="GoToCompanies" disabled="@isSaving">
+                                    <i class="bi bi-building me-1" aria-hidden="true"></i> Ir a Empresas
+                                </button>
+                                <span class="small text-muted ms-2">o captura igualmente.</span>
+                            </div>
+                        }
+
+                        <div class="capture-total">
+                            <span class="eyebrow">Patrimonio total</span>
+                            <span class="num capture-total-value">@Money(s.TotalPatrimony, s.CurrencyCode)</span>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-3">
+                                <thead>
+                                    <tr>
+                                        <th>Clase</th>
+                                        <th class="text-end">Valor actual</th>
+                                        <th class="text-end">Invertido</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td><span class="swatch-dot" style="--swatch:var(--indigo)"></span>Acciones</td><td class="text-end num">@Money(s.StocksValue, s.CurrencyCode)</td><td class="text-end num">@Money(s.StocksInvested, s.CurrencyCode)</td></tr>
+                                    <tr><td><span class="swatch-dot" style="--swatch:var(--teal)"></span>Fondos</td><td class="text-end num">@Money(s.FundsValue, s.CurrencyCode)</td><td class="text-end num">@Money(s.FundsInvested, s.CurrencyCode)</td></tr>
+                                    <tr><td><span class="swatch-dot" style="--swatch:var(--sage)"></span>Efectivo</td><td class="text-end num">@Money(s.BankBalance, s.CurrencyCode)</td><td class="text-end text-muted">—</td></tr>
+                                    <tr><td><span class="swatch-dot" style="--swatch:var(--amber)"></span>Activos refugio</td><td class="text-end num">@Money(s.SafeHavenValue, s.CurrencyCode)</td><td class="text-end num">@Money(s.SafeHavenInvested, s.CurrencyCode)</td></tr>
+                                    <tr><td><span class="swatch-dot" style="--swatch:var(--plum)"></span>Inmuebles</td><td class="text-end num">@Money(s.RealEstateValue, s.CurrencyCode)</td><td class="text-end num">@Money(s.RealEstateInvested, s.CurrencyCode)</td></tr>
+                                </tbody>
+                                <tfoot>
+                                    <tr class="fw-bold">
+                                        <td>Total invertido (sin efectivo)</td>
+                                        <td></td>
+                                        <td class="text-end num">@Money(s.TotalInvested, s.CurrencyCode)</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+
+                        <div class="mb-1">
+                            <label class="form-label" for="wealth-capture-note">Nota (opcional)</label>
+                            <textarea id="wealth-capture-note" class="form-control" rows="2" maxlength="200"
+                                      placeholder="P. ej. cobrada la paga extra, venta de ACS…"
+                                      @bind="note" @bind:event="oninput" disabled="@isSaving"></textarea>
+                            <div class="form-text text-end">@(note?.Length ?? 0)/200</div>
+                        </div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        <div class="alert alert-danger mb-0" role="alert">
+                            <i class="bi bi-exclamation-triangle-fill me-2" aria-hidden="true"></i>@errorMessage
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="Close" disabled="@isSaving">Cancelar</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveAsync" disabled="@(isSaving || isLoading || preview == null)">
+                        @if (isSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        }
+                        @(preview?.ExistingCapturedAt.HasValue == true ? "Sustituir captura" : "Guardar captura")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Se invoca tras guardar, con la captura guardada</summary>
+    [Parameter] public EventCallback<WealthSnapshot> OnCaptured { get; set; }
+
+    private bool isVisible;
+    private bool isLoading;
+    private bool isSaving;
+    private string? errorMessage;
+    private string? note;
+    private int selectedKey;
+    private IReadOnlyList<SnapshotPeriod> periods = Array.Empty<SnapshotPeriod>();
+    private WealthSnapshotPreview? preview;
+
+    private SnapshotPeriod? Selected => periods.FirstOrDefault(p => p.Key == selectedKey);
+    private string SelectedLabel => Selected?.Label ?? string.Empty;
+
+    /// <summary>Abre la ventana con el mes en curso seleccionado</summary>
+    public async Task ShowAsync()
+    {
+        periods = WealthSnapshotService.GetCapturePeriods(DateTime.Now);
+        selectedKey = periods[0].Key;
+        errorMessage = null;
+        isVisible = true;
+        await LoadPreviewAsync();
+    }
+
+    private async Task OnPeriodChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var key))
+        {
+            selectedKey = key;
+            await LoadPreviewAsync();
+        }
+    }
+
+    private async Task LoadPreviewAsync()
+    {
+        var period = Selected;
+        if (period == null)
+        {
+            return;
+        }
+
+        isLoading = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            preview = await WealthSnapshotService.PreviewAsync(period.Year, period.Month);
+            // Al sustituir, la nota existente viene precargada
+            note = preview.ExistingNote;
+        }
+        catch (Exception ex)
+        {
+            preview = null;
+            errorMessage = $"No se pudo calcular el patrimonio: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        var period = Selected;
+        if (period == null || isSaving)
+        {
+            return;
+        }
+
+        isSaving = true;
+        errorMessage = null;
+
+        try
+        {
+            var saved = await WealthSnapshotService.CaptureAsync(period.Year, period.Month, note);
+            isVisible = false;
+            await OnCaptured.InvokeAsync(saved);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private void GoToCompanies()
+    {
+        isVisible = false;
+        Navigation.NavigateTo("/companies");
+    }
+
+    private void Close()
+    {
+        if (!isSaving)
+        {
+            isVisible = false;
+        }
+    }
+
+    private static string Money(decimal amount, string currency) => CurrencyFormatter.Format(amount, currency);
+}

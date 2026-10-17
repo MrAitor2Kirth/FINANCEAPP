@@ -1,12 +1,13 @@
 ﻿@page "/"
 @using FINANCEAPP.Services
-@inject IFinancialService FinancialService
+@inject IDashboardService DashboardService
 
 <PageTitle>Inicio</PageTitle>
 
 <section class="home-hero">
-    <p class="eyebrow">Saldo total</p>
-    <p class="home-balance">@saldoTotal.ToString("C")</p>
+    <AppLogo Variant="hero" />
+    <p class="eyebrow">Patrimonio total</p>
+    <p class="home-balance">@CurrencyFormatter.Format(totalPatrimony, currencyCode)</p>
     <a class="btn btn-primary" href="dashboard">Ver el patrimonio completo</a>
 </section>
 
@@ -44,18 +45,22 @@
 </div>
 
 @code {
-    private decimal saldoTotal = 0m;
+    private decimal totalPatrimony = 0m;
+    private string currencyCode = CurrencyFormatter.DefaultCurrency;
 
     protected override async Task OnInitializedAsync()
     {
-        // Cargar el saldo total desde el servicio
+        // Mismo patrimonio total que el Dashboard (antes salía del registro antiguo FinancialRecords,
+        // que no cambiaba al crear o borrar inmuebles ni otras inversiones)
         try
         {
-            saldoTotal = await FinancialService.GetTotalBalanceAsync();
+            var summary = await DashboardService.GetDashboardSummaryAsync();
+            totalPatrimony = summary.TotalPatrimony;
+            currencyCode = (await DashboardService.GetCurrencyInfoAsync()).CurrencyCode;
         }
         catch
         {
-            saldoTotal = 0m;
+            totalPatrimony = 0m;
         }
     }
 }

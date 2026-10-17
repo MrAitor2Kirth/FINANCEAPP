@@ -65,6 +65,65 @@ namespace FINANCEAPP.Services
         Task<SaleRegistrationResult> RegisterSaleAsync(Operation sale, decimal sellPrice);
 
         /// <summary>
+        /// Deshace una venta: reabre las compras que cerró, vuelve a unir los lotes partidos,
+        /// elimina la operación Venta y el registro del histórico y recalcula la empresa (todo en una transacción)
+        /// </summary>
+        /// <param name="saleHistoryId">Id del registro del histórico de ventas</param>
+        /// <returns>Resultado con éxito, mensaje de error y número de compras reabiertas y filas unidas</returns>
+        Task<SaleUndoResult> UndoSaleAsync(int saleHistoryId);
+
+        /// <summary>
+        /// Aviso en español al editar una operación ligada a una venta del histórico (compra o traspaso que cerró,
+        /// o la propia Venta); null si no está ligada. Editar está permitido.
+        /// </summary>
+        /// <param name="operationId">Identificador de la operación</param>
+        Task<string?> GetSaleEditWarningAsync(int operationId);
+
+        /// <summary>
+        /// Reabre las compras y traspasos que siguen cerrados por una venta que ya no existe en el histórico
+        /// y recalcula sus empresas. Se ejecuta al arrancar; es idempotente.
+        /// </summary>
+        /// <returns>Número de operaciones reabiertas</returns>
+        Task<int> RepairOrphanSaleLinksAsync();
+
+        /// <summary>
+        /// Indica si una operación está cerrada por una venta del histórico y por tanto no se puede eliminar
+        /// (editar sí se puede, con el aviso de <see cref="GetSaleEditWarningAsync"/>)
+        /// </summary>
+        /// <param name="operationId">Identificador de la operación</param>
+        /// <returns>Mensaje en español si está bloqueada; null si se puede editar y eliminar</returns>
+        Task<string?> GetSaleLockMessageAsync(int operationId);
+
+        /// <summary>
+        /// Acciones disponibles para vender de una empresa (lotes abiertos de Compra y Traspaso menos
+        /// Ventas antiguas abiertas), mínimo 0. Misma cuenta que <see cref="RegisterSaleAsync"/>.
+        /// </summary>
+        /// <param name="companyName">Nombre de la empresa</param>
+        Task<int> GetAvailableSharesAsync(string companyName);
+
+        /// <summary>
+        /// Motivo en español por el que no se puede operar desde el gráfico, o null si se puede (SPEC-05-01, RF-6)
+        /// </summary>
+        /// <param name="type">"Compra" o "Venta"</param>
+        /// <param name="date">Fecha de la operación</param>
+        /// <param name="marketState">Estado del mercado</param>
+        /// <param name="availableShares">Acciones disponibles para vender</param>
+        string? GetQuickTradeBlockReason(string type, DateTime date, MarketState marketState, int availableShares);
+
+        /// <summary>
+        /// Registra una Compra (con <see cref="AddAsync"/>) o una Venta (con <see cref="RegisterSaleAsync"/>)
+        /// desde el gráfico de cotización, revalidando el bloqueo por mercado y el importe (SPEC-05-01)
+        /// </summary>
+        /// <param name="request">Datos del mini-formulario del gráfico</param>
+        Task<QuickTradeResult> RegisterQuickTradeAsync(QuickTradeRequest request);
+
+        /// <summary>
+        /// Marcadores de compras, traspasos, ventas y dividendos de una empresa para el gráfico de cotización
+        /// </summary>
+        /// <param name="companyName">Nombre de la empresa</param>
+        Task<List<ChartMarker>> GetChartMarkersAsync(string companyName);
+
+        /// <summary>
         /// Actualiza una operación existente
         /// </summary>
         /// <param name="operation">Operación con los datos actualizados</param>
@@ -115,6 +174,35 @@ namespace FINANCEAPP.Services
         public int SaleHistoryId { get; set; }
 
         public static SaleRegistrationResult Fail(string message) =>
+            new() { Success = false, ErrorMessage = message };
+    }
+
+    /// <summary>
+    /// Resultado de deshacer una venta con <see cref="IOperationService.UndoSaleAsync"/>
+    /// </summary>
+    public class SaleUndoResult
+    {
+        /// <summary>
+        /// Indica si la venta se deshizo correctamente
+        /// </summary>
+        public bool Success { get; set; }
+
+        /// <summary>
+        /// Mensaje de error en español cuando Success es false
+        /// </summary>
+        public string ErrorMessage { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Número de compras o traspasos que se han reabierto (0 si el registro no tenía compras vinculadas)
+        /// </summary>
+        public int ReopenedCount { get; set; }
+
+        /// <summary>
+        /// Número de filas de lotes partidos que se han vuelto a unir
+        /// </summary>
+        public int MergedCount { get; set; }
+
+        public static SaleUndoResult Fail(string message) =>
             new() { Success = false, ErrorMessage = message };
     }
 }

@@ -1,0 +1,316 @@
+@page "/settings/market-catalog"
+@inject IMarketCatalogService MarketCatalog
+@inject ICountryService CountryService
+@inject NavigationManager Navigation
+
+<PageTitle>Catálogo de mercado</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="page-head">
+        <div>
+            <h1 class="sw" style="--swatch:var(--ink-soft)">
+                <i class="bi bi-collection me-2" aria-hidden="true"></i>
+                Catálogo de mercado
+            </h1>
+            <p class="page-sub">Empresas de los principales índices para darlas de alta sin escribir el ticker. Solo consulta · revisión @MarketCatalog.GetCatalogVersion()</p>
+        </div>
+        <a href="/settings" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1" aria-hidden="true"></i> Volver a Configuración
+        </a>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+        </div>
+    }
+    else if (catalog.Count == 0)
+    {
+        <div class="alert alert-info" role="alert">
+            El catálogo de mercado está vacío. Reinicia la aplicación para que se cargue; mientras tanto puedes dar de alta empresas a mano.
+        </div>
+    }
+    else
+    {
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-5">
+                        <label for="catalog-search" class="form-label">Buscar</label>
+                        <input id="catalog-search" class="form-control" placeholder="Nombre o ticker"
+                               @bind="searchText" @bind:event="oninput" />
+                    </div>
+                    <div class="col-md-3">
+                        <label for="catalog-index" class="form-label">Índice</label>
+                        <select id="catalog-index" class="form-select" @bind="selectedIndex">
+                            <option value="">Todos</option>
+                            @foreach (var index in indexLabels)
+                            {
+                                <option value="@index.Key">@index.Value</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="catalog-country" class="form-label">País</label>
+                        <select id="catalog-country" class="form-select" @bind="selectedCountry">
+                            <option value="">Todos</option>
+                            @foreach (var countryCode in catalogCountryCodes)
+                            {
+                                <option value="@countryCode">@CountryName(countryCode) (@countryCode)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-1">
+                        <button type="button" class="btn btn-outline-secondary w-100" title="Limpiar filtros" @onclick="ClearFilters">
+                            <i class="bi bi-x-lg" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-3">
+                    <span class="text-muted">@filtered.Count de @catalog.Count empresas</span>
+                    <div class="d-flex align-items-center gap-2">
+                        @if (filtered.Count > IMarketCatalogService.MaxCheckBatch)
+                        {
+                            <small class="text-muted">Se comprobarán las primeras @IMarketCatalogService.MaxCheckBatch de las @filtered.Count visibles.</small>
+                        }
+                        <button type="button" class="btn btn-outline-primary" @onclick="CheckVisible"
+                                disabled="@(isChecking || filtered.Count == 0)">
+                            @if (isChecking)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                <span>Comprobando...</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-check2-circle me-1" aria-hidden="true"></i>
+                                <span>Comprobar los visibles</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th scope="col" style="width: 130px;">Ticker</th>
+                                <th scope="col">Nombre</th>
+                                <th scope="col" style="width: 200px;">País del mercado</th>
+                                <th scope="col" style="width: 260px;">Índices</th>
+                                <th scope="col" style="width: 190px;" class="text-center">Comprobación</th>
+                                <th scope="col" style="width: 150px;" class="text-center">Alta</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var company in filtered)
+                            {
+                                <tr>
+                                    <td><strong>@company.Ticker</strong></td>
+                                    <td>@company.Name</td>
+                                    <td>@CountryLabel(company.CountryCode)</td>
+                                    <td>
+                                        @foreach (var code in company.IndexCodes)
+                                        {
+                                            <span class="badge bg-light text-dark border me-1">@IndexLabel(code)</span>
+                                        }
+                                    </td>
+                                    <td class="text-center">
+                                        @if (checks.TryGetValue(company.Ticker, out var check))
+                                        {
+                                            @if (check.Running)
+                                            {
+                                                <span class="spinner-border spinner-border-sm" aria-label="Comprobando"></span>
+                                            }
+                                            else if (check.Price.HasValue)
+                                            {
+                                                <span class="badge bg-success">OK</span>
+                                                <span class="num ms-1">@check.Price.Value.ToString("N2")</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-danger">Sin precio</span>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                    @onclick="() => CheckOne(company.Ticker)" disabled="@isChecking">
+                                                Comprobar
+                                            </button>
+                                        }
+                                    </td>
+                                    <td class="text-center">
+                                        @if (owned.Contains(company.Ticker.ToUpperInvariant()))
+                                        {
+                                            <span class="badge bg-secondary">Ya en tu lista</span>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="btn btn-sm btn-primary" @onclick="() => Add(company.Ticker)">
+                                                <i class="bi bi-plus-circle me-1" aria-hidden="true"></i> Añadir
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private sealed class CheckState
+    {
+        public bool Running { get; set; }
+        public decimal? Price { get; set; }
+    }
+
+    private List<MarketCompany> catalog = new();
+    private List<Country> countries = new();
+    private HashSet<string> owned = new();
+    private IReadOnlyDictionary<string, string> indexLabels = new Dictionary<string, string>();
+    private Dictionary<string, CheckState> checks = new();
+    private bool isLoading = true;
+    private bool isChecking;
+
+    private string searchText = string.Empty;
+    private string selectedIndex = string.Empty;
+    private string selectedCountry = string.Empty;
+
+    private List<string> catalogCountryCodes => catalog
+        .Select(c => c.CountryCode)
+        .Distinct()
+        .OrderBy(CountryName)
+        .ToList();
+
+    private List<MarketCompany> filtered => catalog
+        .Where(c => string.IsNullOrEmpty(selectedIndex) || c.IndexCodes.Contains(selectedIndex))
+        .Where(c => string.IsNullOrEmpty(selectedCountry) || c.CountryCode == selectedCountry)
+        .Where(c => Matches(c, searchText))
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            indexLabels = MarketCatalog.GetIndexLabels();
+            catalog = await MarketCatalog.GetAllAsync();
+            countries = await CountryService.GetAllAsync();
+            owned = await MarketCatalog.GetOwnedTickersAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al cargar el catálogo de mercado: {ex.Message}");
+            catalog = new List<MarketCompany>();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    /// <summary>Busca en nombre y ticker sin distinguir mayúsculas ni tildes</summary>
+    private static bool Matches(MarketCompany company, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+
+        var term = RemoveAccents(text);
+        return RemoveAccents(company.Name).Contains(term, StringComparison.Ordinal)
+               || RemoveAccents(company.Ticker).Contains(term, StringComparison.Ordinal);
+    }
+
+    private static string RemoveAccents(string text)
+    {
+        var decomposed = text.Trim().ToLowerInvariant().Normalize(System.Text.NormalizationForm.FormD);
+        var chars = decomposed.Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c)
+                                          != System.Globalization.UnicodeCategory.NonSpacingMark);
+        return new string(chars.ToArray()).Normalize(System.Text.NormalizationForm.FormC);
+    }
+
+    private string CountryName(string code) =>
+        countries.FirstOrDefault(c => c.Code == code)?.Name ?? code;
+
+    private string CountryLabel(string code)
+    {
+        var country = countries.FirstOrDefault(c => c.Code == code);
+        return country == null
+            ? code
+            : $"{country.Name} · {CurrencyFormatter.Label(country.CurrencyCode)}";
+    }
+
+    private string IndexLabel(string code) =>
+        indexLabels.TryGetValue(code, out var label) ? label : code;
+
+    private void ClearFilters()
+    {
+        searchText = string.Empty;
+        selectedIndex = string.Empty;
+        selectedCountry = string.Empty;
+    }
+
+    private void Add(string ticker)
+    {
+        Navigation.NavigateTo($"/companies/new?from={Uri.EscapeDataString(ticker)}");
+    }
+
+    private async Task CheckOne(string ticker)
+    {
+        if (isChecking)
+        {
+            return;
+        }
+
+        isChecking = true;
+        checks[ticker] = new CheckState { Running = true };
+        try
+        {
+            var price = await MarketCatalog.CheckTickerAsync(ticker);
+            checks[ticker] = new CheckState { Price = price };
+        }
+        finally
+        {
+            isChecking = false;
+        }
+    }
+
+    private async Task CheckVisible()
+    {
+        if (isChecking)
+        {
+            return;
+        }
+
+        isChecking = true;
+        try
+        {
+            var tickers = filtered.Take(IMarketCatalogService.MaxCheckBatch).Select(c => c.Ticker).ToList();
+            foreach (var ticker in tickers)
+            {
+                checks[ticker] = new CheckState { Running = true };
+            }
+
+            await MarketCatalog.CheckManyAsync(tickers, async (ticker, price) =>
+            {
+                checks[ticker] = new CheckState { Price = price };
+                await InvokeAsync(StateHasChanged);
+            });
+        }
+        finally
+        {
+            isChecking = false;
+        }
+    }
+}

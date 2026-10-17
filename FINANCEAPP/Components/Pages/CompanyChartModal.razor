@@ -1,37 +1,277 @@
 @using System.Text.Json
+@using Microsoft.Extensions.Logging
+@implements IAsyncDisposable
 @inject IPriceHistoryService PriceHistoryService
 @inject IOperationService OperationService
+@inject ICompanyService CompanyService
+@inject IAppSettingsService AppSettingsService
+@inject IExchangeRateService ExchangeRateService
+@inject ICountryService CountryService
 @inject IJSRuntime JS
+@inject ILogger<CompanyChartModal> Logger
 
 @if (isVisible)
 {
     <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header bg-secondary text-white">
                     <h5 class="mb-0">
                         <i class="bi bi-graph-up me-2"></i>
                         Cotización de @company?.Name (@company?.Ticker)
                     </h5>
-                    <button type="button" class="btn-close btn-close-white" @onclick="Close"></button>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseAsync" aria-label="Cerrar"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="d-flex justify-content-end mb-3">
-                        <div class="btn-group" role="group">
-                            <button type="button" class="btn btn-sm @(granularity == ChartGranularity.Daily ? "btn-primary" : "btn-outline-primary")"
-                                    @onclick="() => ChangeGranularity(ChartGranularity.Daily)">
-                                Diario
+                    @* ---------- Visor de precio en vivo (RF-1 a RF-5) ---------- *@
+                    <div class="live-quote mb-2">
+                        @if (string.IsNullOrWhiteSpace(company?.Ticker))
+                        {
+                            <span class="text-muted"><i class="bi bi-info-circle me-1"></i>Sin ticker: no se puede consultar el precio en vivo.</span>
+                        }
+                        else if (quote == null)
+                        {
+                            <span class="text-muted">
+                                @if (isRefreshingQuote)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>@("Consultando precio en vivo...")
+                                }
+                                else
+                                {
+                                    <i class="bi bi-exclamation-triangle me-1"></i>@("Sin precio en vivo")
+                                }
+                            </span>
+                        }
+                        else
+                        {
+                            <div>
+                                <div class="live-quote-meta">Precio de referencia</div>
+                                <div class="live-quote-price">@CurrencyFormatter.Format(quote.Price, CurrencyCode)</div>
+                            </div>
+                            @if (quote.Change.HasValue)
+                            {
+                                <div class="live-quote-change @(quote.Change.Value >= 0 ? "gain" : "loss")">
+                                    <i class="bi @(quote.Change.Value >= 0 ? "bi-caret-up-fill" : "bi-caret-down-fill")"></i>
+                                    @CurrencyFormatter.Format(quote.Change.Value, CurrencyCode)
+                                    (@(quote.ChangePercent?.ToString("+0.00;-0.00;0.00"))&nbsp;%)
+                                </div>
+                            }
+                            <div class="live-quote-meta">
+                                <div>Máx. <strong>@(quote.DayHigh.HasValue ? CurrencyFormatter.Format(quote.DayHigh.Value, CurrencyCode) : "N/D")</strong></div>
+                                <div>Mín. <strong>@(quote.DayLow.HasValue ? CurrencyFormatter.Format(quote.DayLow.Value, CurrencyCode) : "N/D")</strong></div>
+                            </div>
+                            <div class="live-quote-meta">
+                                <div><span class="market-badge @MarketBadgeClass">@MarketLabel</span></div>
+                                <div>Precio de las @(quote.PriceTime?.ToString("HH:mm") ?? "--:--") · @quote.Symbol</div>
+                            </div>
+                        }
+
+                        <div class="live-quote-actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    title="Actualizar precio"
+                                    disabled="@(isRefreshingQuote || string.IsNullOrWhiteSpace(company?.Ticker))"
+                                    @onclick="RefreshQuoteNowAsync">
+                                <i class="bi bi-arrow-clockwise @(isRefreshingQuote ? "spin" : "")"></i>
+                                Actualizar precio
                             </button>
-                            <button type="button" class="btn btn-sm @(granularity == ChartGranularity.Monthly ? "btn-primary" : "btn-outline-primary")"
-                                    @onclick="() => ChangeGranularity(ChartGranularity.Monthly)">
-                                Mensual
+                            <button type="button" class="btn btn-sm btn-trade-buy"
+                                    disabled="@(quote == null || isSaving)"
+                                    title="@(quote == null ? "Sin precio en vivo" : "Comprar")"
+                                    @onclick="@(() => OpenTradeForm("Compra"))">
+                                <i class="bi bi-plus-circle me-1"></i>Comprar
                             </button>
-                            <button type="button" class="btn btn-sm @(granularity == ChartGranularity.Yearly ? "btn-primary" : "btn-outline-primary")"
-                                    @onclick="() => ChangeGranularity(ChartGranularity.Yearly)">
-                                Anual
+                            <button type="button" class="btn btn-sm btn-trade-sell"
+                                    disabled="@(quote == null || availableShares <= 0 || isSaving)"
+                                    title="@(quote == null ? "Sin precio en vivo" : availableShares <= 0 ? "No tienes acciones de esta empresa" : "Vender")"
+                                    @onclick="@(() => OpenTradeForm("Venta"))">
+                                <i class="bi bi-dash-circle me-1"></i>Vender
                             </button>
                         </div>
                     </div>
+
+                    <div class="small text-muted mb-2">
+                        Precio único de referencia: Yahoo no facilita precio de compra y de venta separados.
+                        @if (quote != null && availableShares <= 0)
+                        {
+                            <span class="ms-1">· No tienes acciones de esta empresa para vender.</span>
+                        }
+                    </div>
+
+                    @if (quoteFailed && quote != null)
+                    {
+                        <div class="alert alert-warning py-1 px-2 small mb-2">
+                            <i class="bi bi-wifi-off me-1"></i>
+                            No se pudo actualizar · último precio de @(quote.PriceTime?.ToString("HH:mm") ?? lastQuoteAt?.ToString("HH:mm") ?? "--:--")
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(successMessage))
+                    {
+                        <div class="alert alert-success alert-dismissible py-2 small mb-2">
+                            <i class="bi bi-check-circle-fill me-1"></i>@successMessage
+                            <button type="button" class="btn-close btn-sm" @onclick="() => successMessage = null" aria-label="Cerrar"></button>
+                        </div>
+                    }
+
+                    @* ---------- Mini-formulario de operación (RF-6 a RF-11) ---------- *@
+                    @if (tradeType != null)
+                    {
+                        <div class="trade-form mb-3 @(tradeType == "Compra" ? "buy" : "sell")">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <strong>@(tradeType == "Compra" ? "Comprar" : "Vender") @company?.Name</strong>
+                                @if (tradeType == "Venta")
+                                {
+                                    <span class="small text-muted">Acciones disponibles: <strong>@availableShares</strong></span>
+                                }
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-6 col-md-2">
+                                    <label class="form-label">Fecha</label>
+                                    <input type="date" class="form-control form-control-sm"
+                                           max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                                           @bind="tradeDate" />
+                                </div>
+                                <div class="col-6 col-md-2">
+                                    <label class="form-label">Acciones</label>
+                                    <input type="number" min="1" step="1" class="form-control form-control-sm"
+                                           @bind="tradeShares" />
+                                </div>
+                                <div class="col-6 col-md-2">
+                                    <label class="form-label">Precio por acción</label>
+                                    <input type="number" min="0.01" step="0.01" class="form-control form-control-sm"
+                                           @bind="tradePrice" @bind:after="RoundTradePrice" @oninput="StopFollowingLivePrice" />
+                                    @if (followLivePrice)
+                                    {
+                                        <small class="text-muted"><i class="bi bi-broadcast me-1"></i>Sigue al precio en vivo</small>
+                                    }
+                                    else if (quote != null)
+                                    {
+                                        <button type="button" class="btn btn-link btn-sm p-0" @onclick="FollowLivePriceAgain">Volver al precio en vivo</button>
+                                    }
+                                </div>
+                                <div class="col-6 col-md-2">
+                                    <label class="form-label">Comisión</label>
+                                    <input type="number" min="0" step="0.01" class="form-control form-control-sm"
+                                           @bind="tradeCommission" />
+                                </div>
+                                @if (!IsBaseCurrency)
+                                {
+                                    <div class="col-6 col-md-2">
+                                        <label class="form-label">Tipo a @baseCurrencyCode</label>
+                                        <input type="number" min="0" step="0.000001" class="form-control form-control-sm"
+                                               placeholder="Sin tipo"
+                                               @bind="tradeExchangeRate" />
+                                    </div>
+                                }
+                                <div class="col-6 col-md-2">
+                                    <label class="form-label">Importe total</label>
+                                    <div class="trade-form-amount">
+                                        @(TradeAmount.HasValue ? CurrencyFormatter.Format(TradeAmount.Value, CurrencyCode) : "—")
+                                    </div>
+                                </div>
+                            </div>
+
+                            @if (TradeBlockReason != null)
+                            {
+                                <div class="text-danger small mt-2"><i class="bi bi-lock-fill me-1"></i>@TradeBlockReason</div>
+                            }
+                            else if (marketState == MarketState.Unknown && tradeDate.Date == DateTime.Today)
+                            {
+                                <div class="text-warning small mt-2"><i class="bi bi-question-circle me-1"></i>No se pudo saber si el mercado está abierto.</div>
+                            }
+
+                            @if (!string.IsNullOrEmpty(tradeError))
+                            {
+                                <div class="alert alert-danger py-1 px-2 small mt-2 mb-0">@tradeError</div>
+                            }
+
+                            <div class="d-flex justify-content-end gap-2 mt-3">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelTrade" disabled="@isSaving">Cancelar</button>
+                                <button type="button"
+                                        class="btn btn-sm @(tradeType == "Compra" ? "btn-trade-buy" : "btn-trade-sell")"
+                                        disabled="@(isSaving || TradeBlockReason != null || !TradeAmount.HasValue)"
+                                        @onclick="ConfirmTradeAsync">
+                                    @if (isSaving)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    @(tradeType == "Compra" ? "Confirmar compra" : "Confirmar venta")
+                                </button>
+                            </div>
+                        </div>
+                    }
+
+                    @* ---------- Controles del gráfico ---------- *@
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                        <div class="chart-layers">
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" id="@($"{chartElementId}-avg")"
+                                       checked="@preferences.ShowAverage"
+                                       disabled="@(isLoadingChart || !HasPosition)"
+                                       @onchange="e => ToggleLayerAsync(LayerAverage, (bool)e.Value!)" />
+                                <label class="form-check-label" for="@($"{chartElementId}-avg")">Precio medio y resultado</label>
+                            </div>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" id="@($"{chartElementId}-candles")"
+                                       checked="@preferences.ShowCandles"
+                                       disabled="@isLoadingChart"
+                                       @onchange="e => ToggleLayerAsync(LayerCandles, (bool)e.Value!)" />
+                                <label class="form-check-label" for="@($"{chartElementId}-candles")">Velas</label>
+                            </div>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" id="@($"{chartElementId}-volume")"
+                                       checked="@preferences.ShowVolume"
+                                       disabled="@isLoadingChart"
+                                       @onchange="e => ToggleLayerAsync(LayerVolume, (bool)e.Value!)" />
+                                <label class="form-check-label" for="@($"{chartElementId}-volume")">Volumen</label>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2 align-items-center">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    title="Volver a descargar el histórico de Yahoo Finance aunque la caché sea reciente"
+                                    disabled="@isLoadingChart"
+                                    @onclick="ReloadHistoryAsync">
+                                <i class="bi bi-cloud-download me-1"></i>Recargar histórico
+                            </button>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-sm @(granularity == ChartGranularity.Daily ? "btn-primary" : "btn-outline-primary")"
+                                        disabled="@isLoadingChart"
+                                        @onclick="() => ChangeGranularityAsync(ChartGranularity.Daily)">
+                                    Diario
+                                </button>
+                                <button type="button" class="btn btn-sm @(granularity == ChartGranularity.Monthly ? "btn-primary" : "btn-outline-primary")"
+                                        disabled="@isLoadingChart"
+                                        @onclick="() => ChangeGranularityAsync(ChartGranularity.Monthly)">
+                                    Mensual
+                                </button>
+                                <button type="button" class="btn btn-sm @(granularity == ChartGranularity.Yearly ? "btn-primary" : "btn-outline-primary")"
+                                        disabled="@isLoadingChart"
+                                        @onclick="() => ChangeGranularityAsync(ChartGranularity.Yearly)">
+                                    Anual
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (preferences.ShowAverage && HasPosition && company != null)
+                    {
+                        <div class="position-summary mb-2">
+                            <span>Acciones <strong>@company.NumberOfShares</strong></span>
+                            <span>Precio medio <strong>@(company.AveragePurchasePrice.HasValue ? CurrencyFormatter.Format(company.AveragePurchasePrice.Value, CurrencyCode) : "N/D")</strong></span>
+                            <span>Invertido <strong>@CurrencyFormatter.Format(company.TotalInvestedInitial, CurrencyCode)</strong></span>
+                            <span>Valor actual <strong>@CurrencyFormatter.Format(company.TotalInvestedValue, CurrencyCode)</strong></span>
+                            <span class="@(UnrealizedResult >= 0 ? "text-success" : "text-danger")">
+                                Resultado <strong>@CurrencyFormatter.Format(UnrealizedResult, CurrencyCode) (@(company.CalculatePlusvaliaReturnPercent().ToString("+0.00;-0.00;0.00"))&nbsp;%)</strong>
+                            </span>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(historyWarning))
+                    {
+                        <div class="alert alert-warning py-1 px-2 small mb-2">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>@historyWarning
+                        </div>
+                    }
 
                     @if (isLoadingChart)
                     {
@@ -40,18 +280,28 @@
                             <p class="mt-3 text-muted">Cargando cotización...</p>
                         </div>
                     }
-                    else if (!hasData)
+                    else if (chartError != null)
                     {
                         <div class="alert alert-warning">
-                            <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                            No se pudo obtener el histórico de cotización para este ticker.
+                            <i class="bi bi-exclamation-triangle-fill me-2"></i>@chartError
                         </div>
                     }
 
-                    <div id="@chartElementId" style="@(isLoadingChart || !hasData ? "display:none;" : "")"></div>
+                    <div id="@chartElementId" style="@(isLoadingChart || chartError != null ? "display:none;" : "")"></div>
+                    <div id="@volumeElementId" style="@(isLoadingChart || chartError != null || !preferences.ShowVolume ? "display:none;" : "")"></div>
+
+                    @if (!isLoadingChart && chartError == null)
+                    {
+                        <div class="chart-legend mt-1">
+                            <span><span class="chart-legend-dot buy"></span>Compra</span>
+                            <span><span class="chart-legend-dot transfer"></span>Traspaso</span>
+                            <span><span class="chart-legend-dot sell"></span>Venta</span>
+                            <span><span class="chart-legend-dot dividend"></span>Dividendo</span>
+                        </div>
+                    }
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" @onclick="Close">Cerrar</button>
+                    <button type="button" class="btn btn-secondary" @onclick="CloseAsync">Cerrar</button>
                 </div>
             </div>
         </div>
@@ -59,97 +309,587 @@
 }
 
 @code {
-    private bool isVisible = false;
-    private bool isLoadingChart = false;
-    private bool hasData = false;
+    /// <summary>
+    /// Se lanza al cerrar el modal. El parámetro indica si se registró alguna operación (para recargar la lista).
+    /// </summary>
+    [Parameter] public EventCallback<bool> OnClosed { get; set; }
+
+    private static readonly TimeSpan LiveRefreshInterval = TimeSpan.FromSeconds(30);
+    private const string LayerAverage = "average";
+    private const string LayerCandles = "candles";
+    private const string LayerVolume = "volume";
+
+    private readonly string chartElementId = $"company-chart-{Guid.NewGuid():N}";
+    private string volumeElementId => chartElementId + "-volume";
+
+    // El modal usa el mismo DbContext que el resto de la app. Antes tenía uno propio y eso dejaba
+    // datos desfasados en el contexto principal: una venta hecha desde el gráfico y deshecha luego en
+    // «Histórico de ventas» no reabría las compras (EF no veía cambios sobre sus copias antiguas).
+    // Mientras el modal está abierto nadie más consulta datos; el semáforo serializa los accesos del modal.
+    private bool isActive;
+
+    // Serializa todo acceso a datos del modal: temporizador, botones y guardado nunca coinciden (RF-14)
+    private readonly SemaphoreSlim dataLock = new(1, 1);
+    private CancellationTokenSource? liveCts;
+
+    private bool isVisible;
+    private bool isLoadingChart;
+    private string? chartError;
+    private string? historyWarning;
     private CompanyDetail? company;
     private ChartGranularity granularity = ChartGranularity.Daily;
-    private readonly string chartElementId = $"company-chart-{Guid.NewGuid():N}";
+    private ChartPreferences preferences = new();
+    private List<PriceHistoryPoint> points = new();
+    private List<ChartMarker> markers = new();
+    private int availableShares;
+    private string baseCurrencyCode = CurrencyFormatter.DefaultCurrency;
+    private bool operated;
+
+    // Precio en vivo
+    private StockQuote? quote;
+    private string? resolvedSymbol;
+    private bool quoteFailed;
+    private bool isRefreshingQuote;
+    private DateTime? lastQuoteAt;
+    private MarketState marketState = MarketState.Unknown;
+
+    // Mini-formulario
+    private string? tradeType;
+    private DateTime tradeDate = DateTime.Today;
+    private int tradeShares = 1;
+    private decimal tradePrice;
+    private decimal tradeCommission;
+    private decimal? tradeExchangeRate;
+    private bool followLivePrice = true;
+    private bool isSaving;
+    private string? tradeError;
+    private string? successMessage;
+
+    private string CurrencyCode => CurrencyFormatter.Normalize(company?.CurrencyCode);
+
+    private bool IsBaseCurrency => string.Equals(CurrencyCode, baseCurrencyCode, StringComparison.OrdinalIgnoreCase);
+
+    private bool HasPosition => company != null && company.NumberOfShares > 0 && company.AveragePurchasePrice.HasValue;
+
+    private decimal UnrealizedResult => company == null ? 0m : company.TotalInvestedValue - company.TotalInvestedInitial;
+
+    private decimal? TradeAmount => OperationAmountCalculator.Calculate(tradePrice, null, tradeShares, tradeCommission);
+
+    private string? TradeBlockReason => tradeType == null
+        ? null
+        : OperationService.GetQuickTradeBlockReason(tradeType, tradeDate, marketState, availableShares);
+
+    private string MarketLabel => marketState switch
+    {
+        MarketState.Open => "Mercado abierto",
+        MarketState.Closed => "Mercado cerrado",
+        _ => "Mercado: desconocido"
+    };
+
+    private string MarketBadgeClass => marketState switch
+    {
+        MarketState.Open => "open",
+        MarketState.Closed => "closed",
+        _ => "unknown"
+    };
 
     /// <summary>
-    /// Abre el modal y carga el gráfico de cotización para la empresa indicada.
+    /// Abre el modal y carga el gráfico de cotización y el precio en vivo de la empresa indicada.
     /// </summary>
     public async Task ShowAsync(CompanyDetail selectedCompany)
     {
+        await StopAsync();
+
+        isActive = true;
         company = selectedCompany;
         granularity = ChartGranularity.Daily;
+        quote = null;
+        resolvedSymbol = null;
+        quoteFailed = false;
+        lastQuoteAt = null;
+        marketState = MarketState.Unknown;
+        tradeType = null;
+        successMessage = null;
+        historyWarning = null;
+        chartError = null;
+        operated = false;
         isVisible = true;
+        isLoadingChart = true;
+        StateHasChanged();
+
+        await RunExclusiveAsync(async () =>
+        {
+            company = await CompanyService.GetByIdAsync(selectedCompany.Id) ?? selectedCompany;
+            preferences = await AppSettingsService.GetChartPreferencesAsync();
+            baseCurrencyCode = CurrencyFormatter.Normalize((await CountryService.GetBaseCurrencyAsync()).CurrencyCode);
+            await LoadOperationDataAsync();
+            await LoadHistoryAsync(false);
+        });
+
         await RenderChartAsync();
+        await RefreshQuoteAsync(CancellationToken.None);
+        StartLiveLoop();
     }
 
-    private void Close()
-    {
-        isVisible = false;
-        _ = JS.InvokeVoidAsync("companyChart.destroy", chartElementId);
-    }
+    // ---------------------------------------------------------------- Ciclo de vida
 
-    private async Task ChangeGranularity(ChartGranularity newGranularity)
+    private void StartLiveLoop()
     {
-        if (granularity == newGranularity)
+        if (string.IsNullOrWhiteSpace(company?.Ticker))
         {
             return;
         }
 
-        granularity = newGranularity;
-        await RenderChartAsync();
+        liveCts = new CancellationTokenSource();
+        _ = LiveLoopAsync(liveCts.Token);
     }
 
-    private async Task RenderChartAsync()
+    private async Task LiveLoopAsync(CancellationToken token)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(LiveRefreshInterval);
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                await InvokeAsync(() => RefreshQuoteAsync(token));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Modal cerrado
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error en el refresco automático del precio en vivo");
+        }
+    }
+
+    /// <summary>
+    /// Detiene el refresco, destruye el gráfico y libera el ámbito de servicios (RF-15)
+    /// </summary>
+    private async Task StopAsync()
+    {
+        if (liveCts != null)
+        {
+            liveCts.Cancel();
+            liveCts.Dispose();
+            liveCts = null;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("companyChart.destroy", chartElementId);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or InvalidOperationException)
+        {
+            // La página ya no está disponible: no hay nada que destruir
+        }
+
+        if (isActive)
+        {
+            isActive = false;
+
+            // Se espera a que termine la consulta en curso: el DbContext es compartido y la página
+            // que recarga después no puede usarlo a la vez
+            await dataLock.WaitAsync();
+            dataLock.Release();
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        isVisible = false;
+        tradeType = null;
+        await StopAsync();
+        await OnClosed.InvokeAsync(operated);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync();
+    }
+
+    /// <summary>
+    /// Ejecuta un acceso a datos en exclusiva (sin consultas simultáneas sobre el DbContext del modal)
+    /// </summary>
+    private async Task RunExclusiveAsync(Func<Task> action)
+    {
+        await dataLock.WaitAsync();
+        try
+        {
+            // Si el modal se cerró mientras se esperaba el turno, no se consulta nada
+            if (isActive)
+            {
+                await action();
+            }
+        }
+        finally
+        {
+            dataLock.Release();
+        }
+    }
+
+    // ---------------------------------------------------------------- Datos e histórico
+
+    /// <summary>
+    /// Carga una sola vez por apertura (y tras operar) los marcadores, las acciones disponibles y el tipo de cambio (RF-17)
+    /// </summary>
+    private async Task LoadOperationDataAsync()
     {
         if (company == null)
         {
             return;
         }
 
-        isLoadingChart = true;
-        StateHasChanged();
+        markers = await OperationService.GetChartMarkersAsync(company.Name);
+        availableShares = await OperationService.GetAvailableSharesAsync(company.Name);
+    }
 
+    private async Task LoadHistoryAsync(bool forceRefresh)
+    {
+        if (company == null)
+        {
+            return;
+        }
+
+        historyWarning = null;
         try
         {
-            var points = await PriceHistoryService.GetHistoryAsync(company.Id, company.Ticker, granularity);
-            var operations = await OperationService.GetByCompanyAsync(company.Name);
+            var result = await PriceHistoryService.GetHistoryWithStatusAsync(company.Id, company.Ticker, granularity, forceRefresh);
+            points = result.Points;
 
-            var purchaseOperations = operations
-                .Where(o => o.Type.Contains("Compra", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            hasData = points.Count > 0;
-
-            if (!hasData)
+            if (result.RefreshFailed && points.Count > 0)
             {
-                return;
+                historyWarning = HasInternet()
+                    ? "No se pudo descargar el histórico de Yahoo Finance; se muestra el guardado."
+                    : "Sin conexión a Internet; se muestra el histórico guardado.";
             }
 
-            var currentPrice = company.LivePrice ?? company.CurrentPrice;
-
-            var payload = new
-            {
-                series = points.Select(p => new
-                {
-                    x = new DateTimeOffset(p.Date).ToUnixTimeMilliseconds(),
-                    y = p.Close
-                }),
-                operations = purchaseOperations.Select(o => new
-                {
-                    date = new DateTimeOffset(o.Date).ToUnixTimeMilliseconds(),
-                    dateLabel = o.Date.ToString("dd/MM/yyyy"),
-                    price = o.PricePerShare,
-                    shares = o.NumberOfShares
-                }),
-                currentPrice
-            };
-
-            var json = JsonSerializer.Serialize(payload);
-            await JS.InvokeVoidAsync("companyChart.render", chartElementId, json);
+            chartError = points.Count > 0
+                ? null
+                : HasInternet()
+                    ? "No hay histórico de cotización para este ticker."
+                    : "No se pudo conectar con Yahoo Finance: no hay conexión a Internet.";
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error al cargar el gráfico de cotización: {ex.Message}");
-            hasData = false;
+            Logger.LogError(ex, "Error al cargar el histórico de cotización de {Company}", company.Name);
+            points = new();
+            chartError = "No se pudo conectar con Yahoo Finance.";
+        }
+    }
+
+    private static bool HasInternet()
+    {
+        try
+        {
+            return Microsoft.Maui.Networking.Connectivity.Current.NetworkAccess == Microsoft.Maui.Networking.NetworkAccess.Internet;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private async Task RenderChartAsync()
+    {
+        isLoadingChart = false;
+        StateHasChanged();
+
+        if (company == null || chartError != null || points.Count == 0 || !isVisible)
+        {
+            return;
+        }
+
+        var payload = new
+        {
+            series = points.Select(p => new
+            {
+                x = new DateTimeOffset(p.Date).ToUnixTimeMilliseconds(),
+                o = p.Open,
+                h = p.High,
+                l = p.Low,
+                c = p.Close,
+                v = p.Volume
+            }),
+            markers = markers.Select(m => new
+            {
+                kind = m.Kind.ToString(),
+                date = new DateTimeOffset(m.Date.Date).ToUnixTimeMilliseconds(),
+                dateLabel = m.Date.ToString("dd/MM/yyyy"),
+                price = m.Price,
+                shares = m.Shares,
+                amount = m.Amount
+            }),
+            currentPrice = quote?.Price ?? company.LivePrice ?? (company.CurrentPrice > 0 ? company.CurrentPrice : (decimal?)null),
+            averagePrice = company.AveragePurchasePrice,
+            currencySymbol = CurrencyFormatter.Symbol(CurrencyCode),
+            showCandles = preferences.ShowCandles,
+            showVolume = preferences.ShowVolume,
+            showAverage = preferences.ShowAverage && HasPosition,
+            isDaily = granularity == ChartGranularity.Daily
+        };
+
+        try
+        {
+            await JS.InvokeVoidAsync("companyChart.render", chartElementId, volumeElementId, JsonSerializer.Serialize(payload));
+
+            if (quote != null && granularity == ChartGranularity.Daily)
+            {
+                await JS.InvokeVoidAsync("companyChart.updateLive", chartElementId, quote.Price, TodayMs());
+            }
+        }
+        catch (JSException ex) when (ex.Message.Contains("APEXCHARTS_NOT_LOADED"))
+        {
+            chartError = "No se pudo cargar la librería de gráficos (¿sin conexión a Internet?).";
+            StateHasChanged();
+        }
+        catch (JSException ex)
+        {
+            Logger.LogError(ex, "Error al dibujar el gráfico de cotización");
+            chartError = "No se pudo dibujar el gráfico de cotización.";
+            StateHasChanged();
+        }
+    }
+
+    private static long TodayMs() => new DateTimeOffset(DateTime.Today).ToUnixTimeMilliseconds();
+
+    private async Task ChangeGranularityAsync(ChartGranularity newGranularity)
+    {
+        if (granularity == newGranularity || isLoadingChart)
+        {
+            return;
+        }
+
+        granularity = newGranularity;
+        isLoadingChart = true;
+        StateHasChanged();
+        await RunExclusiveAsync(() => LoadHistoryAsync(false));
+        await RenderChartAsync();
+    }
+
+    private async Task ReloadHistoryAsync()
+    {
+        if (isLoadingChart)
+        {
+            return;
+        }
+
+        isLoadingChart = true;
+        StateHasChanged();
+        await RunExclusiveAsync(() => LoadHistoryAsync(true));
+        await RenderChartAsync();
+    }
+
+    private async Task ToggleLayerAsync(string layer, bool value)
+    {
+        switch (layer)
+        {
+            case LayerAverage: preferences.ShowAverage = value; break;
+            case LayerCandles: preferences.ShowCandles = value; break;
+            case LayerVolume: preferences.ShowVolume = value; break;
+        }
+
+        await RunExclusiveAsync(async () =>
+        {
+            var result = await AppSettingsService.SaveChartPreferencesAsync(preferences);
+            if (!result.Success)
+            {
+                Logger.LogWarning("No se guardaron las preferencias del gráfico: {Error}", result.ErrorMessage);
+            }
+        });
+
+        // Las capas solo cambian el dibujo: no se vuelve a consultar el histórico
+        await RenderChartAsync();
+    }
+
+    // ---------------------------------------------------------------- Precio en vivo
+
+    private Task RefreshQuoteNowAsync() => RefreshQuoteAsync(CancellationToken.None);
+
+    private async Task RefreshQuoteAsync(CancellationToken token)
+    {
+        if (isRefreshingQuote || company == null || string.IsNullOrWhiteSpace(company.Ticker) || token.IsCancellationRequested)
+        {
+            return;
+        }
+
+        isRefreshingQuote = true;
+        StateHasChanged();
+
+        StockQuote? newQuote = null;
+        try
+        {
+            await RunExclusiveAsync(async () =>
+            {
+                newQuote = await CompanyService.RefreshLiveQuoteAsync(company.Id, resolvedSymbol);
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al refrescar el precio en vivo de {Company}", company.Name);
         }
         finally
         {
-            isLoadingChart = false;
+            isRefreshingQuote = false;
+        }
+
+        if (token.IsCancellationRequested || !isVisible)
+        {
+            return;
+        }
+
+        if (newQuote != null)
+        {
+            quote = newQuote;
+            resolvedSymbol = newQuote.Symbol;
+            quoteFailed = false;
+            lastQuoteAt = DateTime.Now;
+            company.LivePrice = newQuote.Price;
+            company.LivePriceUpdatedAt = DateTime.Now;
+
+            // El precio del formulario sigue al vivo hasta confirmar, salvo que se haya escrito a mano (D10)
+            if (tradeType != null && followLivePrice)
+            {
+                tradePrice = Math.Round(newQuote.Price, 2);
+            }
+
+            try
+            {
+                await JS.InvokeVoidAsync("companyChart.updateLive", chartElementId, newQuote.Price, TodayMs());
+            }
+            catch (JSException ex)
+            {
+                Logger.LogWarning(ex, "No se pudo actualizar el precio en el gráfico");
+            }
+        }
+        else
+        {
+            quoteFailed = true;
+        }
+
+        UpdateMarketState();
+        StateHasChanged();
+    }
+
+    private void UpdateMarketState()
+    {
+        marketState = quote?.GetMarketState(DateTime.UtcNow) ?? MarketState.Unknown;
+    }
+
+    // ---------------------------------------------------------------- Operar
+
+    private async Task OpenTradeForm(string type)
+    {
+        if (quote == null)
+        {
+            return;
+        }
+
+        tradeType = type;
+        tradeDate = DateTime.Today;
+        tradeShares = 1;
+        tradePrice = Math.Round(quote.Price, 2);
+        tradeCommission = 0m;
+        followLivePrice = true;
+        tradeError = null;
+        successMessage = null;
+        tradeExchangeRate = null;
+        UpdateMarketState();
+
+        if (!IsBaseCurrency)
+        {
+            await RunExclusiveAsync(async () =>
+            {
+                tradeExchangeRate = (await ExchangeRateService.GetCurrentRateAsync(CurrencyCode))?.Rate;
+            });
+        }
+    }
+
+    // El precio por acción se guarda con 2 decimales
+    private void RoundTradePrice() => tradePrice = Math.Round(tradePrice, 2);
+
+    private void StopFollowingLivePrice()
+    {
+        followLivePrice = false;
+    }
+
+    private void FollowLivePriceAgain()
+    {
+        followLivePrice = true;
+        if (quote != null)
+        {
+            tradePrice = Math.Round(quote.Price, 2);
+        }
+    }
+
+    private void CancelTrade()
+    {
+        tradeType = null;
+        tradeError = null;
+    }
+
+    private async Task ConfirmTradeAsync()
+    {
+        if (isSaving || tradeType == null || company == null)
+        {
+            return;
+        }
+
+        isSaving = true;
+        tradeError = null;
+        UpdateMarketState();
+
+        var request = new QuickTradeRequest
+        {
+            CompanyId = company.Id,
+            Type = tradeType,
+            Date = tradeDate,
+            NumberOfShares = tradeShares,
+            PricePerShare = tradePrice,
+            Commission = tradeCommission,
+            ExchangeRate = IsBaseCurrency ? null : tradeExchangeRate,
+            MarketState = marketState
+        };
+
+        try
+        {
+            QuickTradeResult? result = null;
+            await RunExclusiveAsync(async () =>
+            {
+                result = await OperationService.RegisterQuickTradeAsync(request);
+
+                if (result.Success)
+                {
+                    company = await CompanyService.GetByIdAsync(company.Id) ?? company;
+                    if (quote != null)
+                    {
+                        company.LivePrice = quote.Price;
+                    }
+                    await LoadOperationDataAsync();
+                }
+            });
+
+            if (result == null || !result.Success)
+            {
+                // El formulario sigue abierto para poder corregir (RF-9)
+                tradeError = result?.ErrorMessage ?? "No se pudo registrar la operación.";
+                return;
+            }
+
+            operated = true;
+            successMessage = $"{(request.Type == "Compra" ? "Compra" : "Venta")} registrada: {request.NumberOfShares} acciones a {CurrencyFormatter.Format(request.PricePerShare, CurrencyCode)}.";
+            tradeType = null;
+            await RenderChartAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al registrar la operación desde el gráfico");
+            tradeError = "No se pudo registrar la operación. No se ha guardado nada.";
+        }
+        finally
+        {
+            isSaving = false;
             StateHasChanged();
         }
     }

@@ -1,0 +1,485 @@
+@page "/history/wealth"
+@using System.Text.Json
+@inject IWealthSnapshotService WealthSnapshotService
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Histórico del patrimonio</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="page-head">
+        <div>
+            <h1 class="sw" style="--swatch:var(--indigo)">
+                <i class="bi bi-graph-up-arrow me-2" aria-hidden="true"></i> Histórico del patrimonio
+            </h1>
+            <p class="page-sub">Una captura por mes con los importes del Dashboard</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a href="/history" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left me-1" aria-hidden="true"></i> Volver al histórico
+            </a>
+            <button class="btn btn-outline-primary" @onclick="ExportCsv" disabled="@(rows.Count == 0 || isExporting)">
+                <i class="bi bi-filetype-csv me-1" aria-hidden="true"></i> Exportar CSV
+            </button>
+            <button class="btn btn-primary" @onclick="OpenCapture">
+                <i class="bi bi-camera me-1" aria-hidden="true"></i> Capturar patrimonio
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success alert-dismissible" role="status">
+            <i class="bi bi-check-circle-fill me-2" aria-hidden="true"></i>@successMessage
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => successMessage = null"></button>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2" aria-hidden="true"></i>@errorMessage
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => errorMessage = null"></button>
+        </div>
+    }
+
+    <div class="history-toolbar">
+        <div class="btn-group" role="group" aria-label="Vista">
+            <button type="button" class="btn btn-sm @(view == WealthView.Monthly ? "btn-primary" : "btn-outline-primary")" @onclick="() => ChangeView(WealthView.Monthly)">Mensual</button>
+            <button type="button" class="btn btn-sm @(view == WealthView.Annual ? "btn-primary" : "btn-outline-primary")" @onclick="() => ChangeView(WealthView.Annual)">Anual</button>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <label class="form-label mb-0" for="wealth-year">Año</label>
+            <select id="wealth-year" class="form-select form-select-sm" style="width:auto" value="@(selectedYear?.ToString() ?? "")" @onchange="OnYearChanged">
+                <option value="">Todos</option>
+                @foreach (var y in years)
+                {
+                    <option value="@y">@y</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center p-5">
+            <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Cargando...</span></div>
+        </div>
+    }
+    else if (rows.Count == 0)
+    {
+        <div class="empty-state">
+            <i class="bi bi-camera" aria-hidden="true"></i>
+            <p>Aún no hay capturas. Pulsa «Capturar patrimonio» para guardar la primera.</p>
+        </div>
+    }
+    else
+    {
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <div id="@chartElementId"></div>
+                @if (chartData != null && chartData.HiddenOtherCurrency > 0)
+                {
+                    <p class="small text-muted mb-0 mt-2">
+                        <i class="bi bi-info-circle me-1" aria-hidden="true"></i>
+                        @chartData.HiddenOtherCurrency @(chartData.HiddenOtherCurrency == 1 ? "captura en otra divisa no se muestra" : "capturas en otra divisa no se muestran") en el gráfico.
+                    </p>
+                }
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0 wealth-table">
+                    <thead>
+                        <tr>
+                            <th scope="col" style="width:2rem"><span class="visually-hidden">Desplegar</span></th>
+                            <th scope="col">Periodo</th>
+                            <th scope="col" class="text-end">Patrimonio</th>
+                            <th scope="col" class="text-end">@(view == WealthView.Annual ? "Vs. año anterior" : "Vs. anterior")</th>
+                            @if (view == WealthView.Monthly)
+                            {
+                                <th scope="col" class="text-end">Vs. hace un año</th>
+                            }
+                            <th scope="col" class="text-end">Invertido</th>
+                            <th scope="col" class="text-end">Plusvalía latente</th>
+                            <th scope="col">Nota</th>
+                            <th scope="col">Capturada</th>
+                            @if (view == WealthView.Monthly)
+                            {
+                                <th scope="col" class="text-end"><span class="visually-hidden">Acciones</span></th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in rows)
+                        {
+                            var s = row.Snapshot;
+                            var expanded = expandedIds.Contains(s.Id);
+                            <tr>
+                                <td>
+                                    <button class="btn btn-sm btn-link p-0" aria-expanded="@(expanded ? "true" : "false")" aria-label="Ver detalle por clase" @onclick="() => ToggleExpand(s.Id)">
+                                        <i class="bi @(expanded ? "bi-chevron-down" : "bi-chevron-right")" aria-hidden="true"></i>
+                                    </button>
+                                </td>
+                                <td>
+                                    @if (view == WealthView.Annual)
+                                    {
+                                        <strong>@s.Year</strong> <span class="text-muted">· @MonthShort(s.Month)</span>
+                                        @if (row.IsCurrentYear)
+                                        {
+                                            <span class="badge bg-secondary ms-1">en curso</span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <strong>@s.PeriodLabel</strong>
+                                    }
+                                    @if (s.ExcludedCompanies > 0)
+                                    {
+                                        <i class="bi bi-exclamation-triangle text-warning ms-1" title="@s.ExcludedCompanies empresa(s) sin tipo de cambio quedaron fuera del total" aria-label="Empresas sin tipo de cambio excluidas"></i>
+                                    }
+                                </td>
+                                <td class="text-end num">@Money(s.TotalPatrimony, s.CurrencyCode)</td>
+                                <td class="text-end num">
+                                    @VariationCell(row.VsPrevious, row.PreviousCurrencyMismatch, row.PreviousCurrencyCode, row.PreviousIsGap, s.CurrencyCode)
+                                </td>
+                                @if (view == WealthView.Monthly)
+                                {
+                                    <td class="text-end num">
+                                        @VariationCell(row.VsLastYear, row.LastYearCurrencyMismatch, null, false, s.CurrencyCode)
+                                    </td>
+                                }
+                                <td class="text-end num">@Money(s.TotalInvested, s.CurrencyCode)</td>
+                                <td class="text-end num @(s.LatentGain >= 0 ? "text-success" : "text-danger")">@Money(s.LatentGain, s.CurrencyCode)</td>
+                                <td class="wealth-note">
+                                    @if (view == WealthView.Monthly && editingNoteId == s.Id)
+                                    {
+                                        <div class="d-flex gap-1">
+                                            <input class="form-control form-control-sm" maxlength="200" @bind="editingNote" @bind:event="oninput" aria-label="Nota de la captura" />
+                                            <button class="btn btn-sm btn-success" @onclick="() => SaveNote(s.Id)" disabled="@isSavingNote" aria-label="Guardar nota"><i class="bi bi-check-lg" aria-hidden="true"></i></button>
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="CancelNote" disabled="@isSavingNote" aria-label="Cancelar"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span>@s.Note</span>
+                                    }
+                                </td>
+                                <td class="text-muted small">@s.CapturedAt.ToString("dd/MM/yyyy HH:mm")</td>
+                                @if (view == WealthView.Monthly)
+                                {
+                                    <td class="text-end text-nowrap">
+                                        <button class="btn btn-sm btn-outline-warning" title="Editar nota" aria-label="Editar nota" @onclick="() => StartEditNote(s)"><i class="bi bi-pencil" aria-hidden="true"></i></button>
+                                        <button class="btn btn-sm btn-outline-danger" title="Eliminar captura" aria-label="Eliminar captura" @onclick="() => AskDelete(s)"><i class="bi bi-trash" aria-hidden="true"></i></button>
+                                    </td>
+                                }
+                            </tr>
+                            @if (expanded)
+                            {
+                                <tr class="wealth-detail">
+                                    <td></td>
+                                    <td colspan="@(view == WealthView.Monthly ? 9 : 7)">
+                                        <div class="wealth-classes">
+                                            @ClassBox("Acciones", "var(--indigo)", s.StocksValue, s.StocksInvested, s.CurrencyCode)
+                                            @ClassBox("Fondos", "var(--teal)", s.FundsValue, s.FundsInvested, s.CurrencyCode)
+                                            @ClassBox("Efectivo", "var(--sage)", s.BankBalance, null, s.CurrencyCode)
+                                            @ClassBox("Activos refugio", "var(--amber)", s.SafeHavenValue, s.SafeHavenInvested, s.CurrencyCode)
+                                            @ClassBox("Inmuebles", "var(--plum)", s.RealEstateValue, s.RealEstateInvested, s.CurrencyCode)
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        @if (view == WealthView.Annual)
+        {
+            <p class="small text-muted mt-2">En la vista anual se muestra la captura del último mes de cada año. Para editar o borrar, vuelve a la vista mensual.</p>
+        }
+    }
+</div>
+
+@if (deleteCandidate != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Eliminar captura</h5>
+                    <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => deleteCandidate = null" disabled="@isDeleting"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">¿Eliminar la captura de <strong>@deleteCandidate.PeriodLabel</strong>? Esta acción es definitiva.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => deleteCandidate = null" disabled="@isDeleting">Cancelar</button>
+                    <button class="btn btn-danger" @onclick="ConfirmDelete" disabled="@isDeleting">Eliminar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<WealthCaptureModal @ref="captureModal" OnCaptured="OnCaptured" />
+
+@code {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly string chartElementId = $"wealth-chart-{Guid.NewGuid():N}";
+    private WealthCaptureModal? captureModal;
+    private WealthView view = WealthView.Monthly;
+    private int? selectedYear;
+    private List<int> years = new();
+    private List<WealthSnapshotRow> rows = new();
+    private WealthChartData? chartData;
+    private readonly HashSet<int> expandedIds = new();
+
+    private bool isLoading = true;
+    private bool isExporting;
+    private bool isSavingNote;
+    private bool isDeleting;
+    private bool chartPending;
+    private string? successMessage;
+    private string? errorMessage;
+
+    private int? editingNoteId;
+    private string? editingNote;
+    private WealthSnapshot? deleteCandidate;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (chartPending)
+        {
+            chartPending = false;
+            await RenderChartAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        try
+        {
+            years = await WealthSnapshotService.GetYearsAsync();
+            if (selectedYear.HasValue && !years.Contains(selectedYear.Value))
+            {
+                selectedYear = null;
+            }
+
+            rows = await WealthSnapshotService.GetRowsAsync(view, selectedYear);
+            chartData = await WealthSnapshotService.GetChartDataAsync(view, selectedYear);
+            chartPending = true;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"No se pudo cargar el histórico: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RenderChartAsync()
+    {
+        if (chartData == null || rows.Count == 0)
+        {
+            await JS.InvokeVoidAsync("wealthChart.destroy", chartElementId);
+            return;
+        }
+
+        try
+        {
+            var json = JsonSerializer.Serialize(chartData, JsonOptions);
+            await JS.InvokeVoidAsync("wealthChart.render", chartElementId, json);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al pintar el gráfico del patrimonio: {ex.Message}");
+        }
+    }
+
+    private async Task ChangeView(WealthView newView)
+    {
+        if (view == newView)
+        {
+            return;
+        }
+
+        view = newView;
+        expandedIds.Clear();
+        CancelNote();
+        await LoadAsync();
+    }
+
+    private async Task OnYearChanged(ChangeEventArgs e)
+    {
+        selectedYear = int.TryParse(e.Value?.ToString(), out var y) ? y : null;
+        await LoadAsync();
+    }
+
+    private void ToggleExpand(int id)
+    {
+        if (!expandedIds.Remove(id))
+        {
+            expandedIds.Add(id);
+        }
+    }
+
+    private async Task OpenCapture()
+    {
+        if (captureModal != null)
+        {
+            await captureModal.ShowAsync();
+        }
+    }
+
+    private async Task OnCaptured(WealthSnapshot saved)
+    {
+        successMessage = $"Captura de {saved.PeriodLabel} guardada.";
+        errorMessage = null;
+        await LoadAsync();
+    }
+
+    private void StartEditNote(WealthSnapshot snapshot)
+    {
+        editingNoteId = snapshot.Id;
+        editingNote = snapshot.Note;
+    }
+
+    private void CancelNote()
+    {
+        editingNoteId = null;
+        editingNote = null;
+    }
+
+    private async Task SaveNote(int id)
+    {
+        isSavingNote = true;
+        try
+        {
+            await WealthSnapshotService.UpdateNoteAsync(id, editingNote);
+            CancelNote();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isSavingNote = false;
+        }
+    }
+
+    private void AskDelete(WealthSnapshot snapshot) => deleteCandidate = snapshot;
+
+    private async Task ConfirmDelete()
+    {
+        if (deleteCandidate == null)
+        {
+            return;
+        }
+
+        isDeleting = true;
+        try
+        {
+            var label = deleteCandidate.PeriodLabel;
+            await WealthSnapshotService.DeleteAsync(deleteCandidate.Id);
+            deleteCandidate = null;
+            successMessage = $"Captura de {label} eliminada.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isDeleting = false;
+        }
+    }
+
+    private async Task ExportCsv()
+    {
+        isExporting = true;
+        try
+        {
+            await WealthSnapshotService.ExportCsvAsync(view, selectedYear);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"No se pudo exportar: {ex.Message}";
+        }
+        finally
+        {
+            isExporting = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("wealthChart.destroy", chartElementId);
+        }
+        catch (JSDisconnectedException)
+        {
+            // La vista ya se cerró: no hay nada que limpiar
+        }
+    }
+
+    private static string Money(decimal amount, string currency) => CurrencyFormatter.Format(amount, currency);
+
+    private static string MismatchTitle(string? otherCurrency) =>
+        string.IsNullOrEmpty(otherCurrency) ? "Divisa distinta" : $"Divisa distinta ({otherCurrency})";
+
+    private static string MonthShort(int month) =>
+        System.Globalization.CultureInfo.GetCultureInfo("es-ES").DateTimeFormat.GetAbbreviatedMonthName(month);
+
+    private RenderFragment VariationCell(WealthVariation? variation, bool currencyMismatch, string? otherCurrency, bool isGap, string currency) => __builder =>
+    {
+        if (currencyMismatch)
+        {
+            <span class="text-muted" title="@MismatchTitle(otherCurrency)">—</span>
+        }
+        else if (variation == null)
+        {
+            <span class="text-muted">—</span>
+        }
+        else
+        {
+            var up = variation.Amount >= 0;
+            <span class="@(up ? "text-success" : "text-danger")" title="frente a @variation.ComparedToLabel">
+                @(up ? "▲" : "▼") @Money(variation.Amount, currency)
+                @if (variation.Percent.HasValue)
+                {
+                    <small class="d-block">@variation.Percent.Value.ToString("N2")%</small>
+                }
+            </span>
+            @if (isGap)
+            {
+                <small class="d-block text-muted">frente a @variation.ComparedToLabel</small>
+            }
+        }
+    };
+
+    private RenderFragment ClassBox(string name, string color, decimal value, decimal? invested, string currency) => __builder =>
+    {
+        <div class="wealth-class" style="--swatch:@color">
+            <span class="class-name">@name</span>
+            <span class="num">@Money(value, currency)</span>
+            @if (invested.HasValue)
+            {
+                <span class="small text-muted">Invertido: <span class="num">@Money(invested.Value, currency)</span></span>
+            }
+        </div>
+    };
+}

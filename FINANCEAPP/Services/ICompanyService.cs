@@ -90,6 +90,12 @@ namespace FINANCEAPP.Services
         Task<int> CountOperationsAsync(string companyName);
 
         /// <summary>
+        /// Comprueba el país de la empresa antes de guardarla (SPEC-01-02): obligatorio, existente y,
+        /// si cambia a otra divisa con operaciones, rechazado. Devuelve el mensaje de error o null.
+        /// </summary>
+        Task<string?> GetCountryChangeErrorAsync(CompanyDetail company);
+
+        /// <summary>
         /// Obtiene todos los sectores únicos registrados
         /// </summary>
         /// <returns>Lista de nombres de sectores</returns>
@@ -114,6 +120,15 @@ namespace FINANCEAPP.Services
         /// Actualiza el precio en vivo de una empresa desde Yahoo Finance.
         /// </summary>
         Task<bool> RefreshLivePriceAsync(int companyId);
+
+        /// <summary>
+        /// Consulta la cotización en vivo de una empresa y, si hay precio, guarda LivePrice y su hora
+        /// (SPEC-05-01). Si falla no toca el precio ni la hora guardados.
+        /// </summary>
+        /// <param name="companyId">Id de la empresa</param>
+        /// <param name="resolvedSymbol">Símbolo ya resuelto en una consulta anterior (evita probar sufijos); null para usar el ticker</param>
+        /// <returns>La cotización, o null si la empresa no tiene ticker o no se obtuvo precio</returns>
+        Task<StockQuote?> RefreshLiveQuoteAsync(int companyId, string? resolvedSymbol = null);
 
         /// <summary>
         /// Actualiza el precio en vivo de todas las empresas que tienen ticker.

@@ -1,8 +1,11 @@
 .brand-row {
-    height: 3.5rem;
+    min-height: 3.5rem;
     display: flex;
     align-items: center;
-    padding: 0 1.25rem;
+    /* Separación entre el logo y el primer botón del menú */
+    padding: 0.5rem 1.25rem 0.9rem;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .brand {
@@ -103,6 +106,13 @@
 }
 
 @media (min-width: 641px) {
+    /* Mismo espacio encima del logo (2rem) que entre el logo y el primer botón (1.1rem + línea + 0.9rem) */
+    .brand-row {
+        padding: 2rem 1.25rem 1.1rem;
+        margin-bottom: 0.9rem;
+        flex-shrink: 0;
+    }
+
     .navbar-toggler {
         display: none;
     }
@@ -110,7 +120,8 @@
     .nav-scrollable {
         /* El menú lateral nunca se colapsa en pantallas anchas */
         display: block;
-        height: calc(100vh - 3.5rem);
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
     }
 }

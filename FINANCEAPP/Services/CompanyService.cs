@@ -28,10 +28,55 @@ namespace FINANCEAPP.Services
         /// </summary>
         public async Task<List<CompanyDetail>> GetAllAsync()
         {
-            return await _context.CompanyDetails
+            return await ApplyCurrencyAsync(await _context.CompanyDetails
                 .AsNoTracking()
                 .OrderBy(c => c.Name)
-                .ToListAsync();
+                .ToListAsync());
+        }
+
+        /// <summary>
+        /// Rellena la divisa (CurrencyCode, solo interfaz) de las empresas a partir de su país.
+        /// Las empresas sin país, o con un país que ya no está en el catálogo, quedan en EUR.
+        /// </summary>
+        private async Task<List<CompanyDetail>> ApplyCurrencyAsync(List<CompanyDetail> companies)
+        {
+            if (companies.Count == 0)
+            {
+                return companies;
+            }
+
+            var currencies = await GetCurrenciesByCountryAsync();
+            foreach (var company in companies)
+            {
+                ApplyCurrency(company, currencies);
+            }
+
+            return companies;
+        }
+
+        private async Task<CompanyDetail?> ApplyCurrencyAsync(CompanyDetail? company)
+        {
+            if (company != null)
+            {
+                ApplyCurrency(company, await GetCurrenciesByCountryAsync());
+            }
+
+            return company;
+        }
+
+        private async Task<Dictionary<string, string>> GetCurrenciesByCountryAsync()
+        {
+            return await _context.Countries
+                .AsNoTracking()
+                .ToDictionaryAsync(c => c.Code, c => c.CurrencyCode);
+        }
+
+        private static void ApplyCurrency(CompanyDetail company, Dictionary<string, string> currencies)
+        {
+            company.CurrencyCode = company.CountryCode != null
+                                   && currencies.TryGetValue(company.CountryCode, out var currency)
+                ? CurrencyFormatter.Normalize(currency)
+                : CurrencyFormatter.DefaultCurrency;
         }
 
         /// <summary>
@@ -39,9 +84,9 @@ namespace FINANCEAPP.Services
         /// </summary>
         public async Task<CompanyDetail?> GetByIdAsync(int id)
         {
-            return await _context.CompanyDetails
+            return await ApplyCurrencyAsync(await _context.CompanyDetails
                 .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.Id == id);
+                .FirstOrDefaultAsync(c => c.Id == id));
         }
 
         /// <summary>
@@ -49,9 +94,9 @@ namespace FINANCEAPP.Services
         /// </summary>
         public async Task<CompanyDetail?> GetByTickerAsync(string ticker)
         {
-            return await _context.CompanyDetails
+            return await ApplyCurrencyAsync(await _context.CompanyDetails
                 .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.Ticker == ticker);
+                .FirstOrDefaultAsync(c => c.Ticker == ticker));
         }
 
         /// <summary>
@@ -59,11 +104,11 @@ namespace FINANCEAPP.Services
         /// </summary>
         public async Task<List<CompanyDetail>> GetBySectorAsync(string sector)
         {
-            return await _context.CompanyDetails
+            return await ApplyCurrencyAsync(await _context.CompanyDetails
                 .AsNoTracking()
                 .Where(c => c.Sector == sector)
                 .OrderBy(c => c.Name)
-                .ToListAsync();
+                .ToListAsync());
         }
 
         /// <summary>
@@ -71,11 +116,11 @@ namespace FINANCEAPP.Services
         /// </summary>
         public async Task<List<CompanyDetail>> SearchByNameAsync(string searchTerm)
         {
-            return await _context.CompanyDetails
+            return await ApplyCurrencyAsync(await _context.CompanyDetails
                 .AsNoTracking()
                 .Where(c => c.Name.Contains(searchTerm))
                 .OrderBy(c => c.Name)
-                .ToListAsync();
+                .ToListAsync());
         }
 
         /// <summary>
@@ -83,11 +128,11 @@ namespace FINANCEAPP.Services
         /// </summary>
         public async Task<List<CompanyDetail>> GetByMinDividendYieldAsync(decimal minYield)
         {
-            return await _context.CompanyDetails
+            return await ApplyCurrencyAsync(await _context.CompanyDetails
                 .AsNoTracking()
                 .Where(c => c.DividendYield >= minYield)
                 .OrderByDescending(c => c.DividendYield)
-                .ToListAsync();
+                .ToListAsync());
         }
 
         /// <summary>
@@ -95,11 +140,11 @@ namespace FINANCEAPP.Services
         /// </summary>
         public async Task<List<CompanyDetail>> GetTopByDividendYieldAsync(int topCount = 10)
         {
-            return await _context.CompanyDetails
+            return await ApplyCurrencyAsync(await _context.CompanyDetails
                 .AsNoTracking()
                 .OrderByDescending(c => c.DividendYield)
                 .Take(topCount)
-                .ToListAsync();
+                .ToListAsync());
         }
 
         /// <summary>
@@ -109,6 +154,7 @@ namespace FINANCEAPP.Services
         {
             company.CreatedAt = DateTime.Now;
             company.UpdatedAt = DateTime.Now;
+            company.CountryCode = NormalizeCountryCode(company.CountryCode);
             _context.CompanyDetails.Add(company);
             await _context.SaveChangesAsync();
             return company;
@@ -121,6 +167,43 @@ namespace FINANCEAPP.Services
         {
             var existing = await _context.CompanyDetails.FindAsync(company.Id);
             if (existing == null) return false;
+
+            // País (SPEC-01-02): se valida el cambio y, si la empresa no tenía país, sus operaciones
+            // sin divisa reciben la del nuevo país. Todo se guarda en el mismo SaveChanges.
+            var newCountryCode = NormalizeCountryCode(company.CountryCode);
+            var oldCountryCode = NormalizeCountryCode(existing.CountryCode);
+            if (newCountryCode != oldCountryCode)
+            {
+                if (await GetCountryChangeErrorAsync(company) != null)
+                {
+                    return false;
+                }
+
+                if (newCountryCode != null)
+                {
+                    var country = await _context.Countries.AsNoTracking()
+                        .FirstOrDefaultAsync(c => c.Code == newCountryCode);
+                    if (country == null)
+                    {
+                        return false;
+                    }
+
+                    var oldCountryExists = oldCountryCode != null
+                        && await _context.Countries.AnyAsync(c => c.Code == oldCountryCode);
+                    if (!oldCountryExists)
+                    {
+                        var undated = await _context.Operations
+                            .Where(o => o.CompanyName == existing.Name && o.CurrencyCode == null)
+                            .ToListAsync();
+                        foreach (var operation in undated)
+                        {
+                            operation.CurrencyCode = CurrencyFormatter.Normalize(country.CurrencyCode);
+                        }
+                    }
+                }
+
+                existing.CountryCode = newCountryCode;
+            }
 
             existing.Name = company.Name;
             existing.Ticker = company.Ticker;
@@ -135,6 +218,67 @@ namespace FINANCEAPP.Services
             await _context.SaveChangesAsync();
             return true;
         }
+
+        /// <summary>
+        /// Devuelve el mensaje de error si el cambio de país de la empresa no está permitido
+        /// (país inexistente, o cambio a otra divisa con operaciones), o null si se puede guardar.
+        /// </summary>
+        public async Task<string?> GetCountryChangeErrorAsync(CompanyDetail company)
+        {
+            var newCode = NormalizeCountryCode(company.CountryCode);
+            if (newCode == null)
+            {
+                return "Elige el país de la empresa.";
+            }
+
+            var newCountry = await _context.Countries.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Code == newCode);
+            if (newCountry == null)
+            {
+                return "El país elegido ya no existe en el catálogo.";
+            }
+
+            if (company.Id == 0)
+            {
+                return null;
+            }
+
+            var existing = await _context.CompanyDetails.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == company.Id);
+            if (existing == null || NormalizeCountryCode(existing.CountryCode) == newCode)
+            {
+                return null;
+            }
+
+            var oldCountry = existing.CountryCode == null
+                ? null
+                : await _context.Countries.AsNoTracking().FirstOrDefaultAsync(c => c.Code == existing.CountryCode);
+            if (oldCountry == null)
+            {
+                // Sin país (o país desaparecido): se asigna y las operaciones sin divisa heredan la nueva
+                return null;
+            }
+
+            var oldCurrency = CurrencyFormatter.Normalize(oldCountry.CurrencyCode);
+            var newCurrency = CurrencyFormatter.Normalize(newCountry.CurrencyCode);
+            if (oldCurrency == newCurrency)
+            {
+                return null;
+            }
+
+            var operations = await _context.Operations.CountAsync(o => o.CompanyName == existing.Name);
+            if (operations == 0)
+            {
+                return null;
+            }
+
+            var many = operations == 1 ? "1 operación" : $"{operations} operaciones";
+            return $"No se puede cambiar a {newCountry.Name}: la empresa tiene {many} en {oldCurrency} y ese país usa {newCurrency}. " +
+                   "Elige un país con la misma divisa o elimina antes sus operaciones.";
+        }
+
+        private static string? NormalizeCountryCode(string? code) =>
+            string.IsNullOrWhiteSpace(code) ? null : code.Trim().ToUpperInvariant();
 
         public async Task<bool> UpdateCurrentPriceAsync(string companyName, decimal price)
         {
@@ -291,6 +435,30 @@ namespace FINANCEAPP.Services
             company.LivePriceUpdatedAt = DateTime.Now;
             await _context.SaveChangesAsync();
             return false;
+        }
+
+        public async Task<StockQuote?> RefreshLiveQuoteAsync(int companyId, string? resolvedSymbol = null)
+        {
+            var company = await _context.CompanyDetails.FirstOrDefaultAsync(c => c.Id == companyId);
+            if (company == null || string.IsNullOrWhiteSpace(company.Ticker))
+            {
+                return null;
+            }
+
+            var quote = await _stockPriceService.GetQuoteAsync(
+                string.IsNullOrWhiteSpace(resolvedSymbol) ? company.Ticker : resolvedSymbol);
+
+            // Sin precio no se toca lo guardado: se conserva el último precio válido y su hora
+            if (quote == null)
+            {
+                return null;
+            }
+
+            company.LivePrice = quote.Price;
+            company.LivePriceUpdatedAt = DateTime.Now;
+            company.LivePriceError = null;
+            await _context.SaveChangesAsync();
+            return quote;
         }
 
         public async Task RefreshAllLivePricesAsync()

@@ -1,0 +1,750 @@
+@page "/settings"
+@implements IDisposable
+@inject IAppSettingsService AppSettings
+@inject ICountryService CountryService
+@inject IExchangeRateService ExchangeRateService
+@inject IClaudeApiKeyStore ApiKeyStore
+@inject IJSRuntime JS
+
+<PageTitle>Configuración</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="page-head">
+        <div>
+            <h1 class="sw" style="--swatch:var(--ink-soft)">
+                <i class="bi bi-gear me-2" aria-hidden="true"></i>
+                Configuración
+            </h1>
+            <p class="page-sub">Personaliza la aplicación.</p>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger d-flex align-items-center justify-content-between" role="alert">
+            <div><i class="bi bi-exclamation-triangle-fill me-2" aria-hidden="true"></i>@errorMessage</div>
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="ClearMessages"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-info d-flex align-items-center justify-content-between" role="status">
+            <div><i class="bi bi-info-circle-fill me-2" aria-hidden="true"></i>@infoMessage</div>
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="ClearMessages"></button>
+        </div>
+    }
+
+    <section class="card" aria-labelledby="logo-title">
+        <div class="card-body">
+            <h2 class="h5" id="logo-title">Logo de la aplicación</h2>
+            <p class="text-muted">PNG, JPG o WebP de hasta 2 MB. Se recortarán los márgenes automáticamente.</p>
+
+            <div class="logo-settings">
+                <div class="logo-controls">
+                    <label for="logo-file" class="form-label">Imagen</label>
+                    <InputFile id="logo-file" class="form-control" accept="image/png,image/jpeg,image/webp"
+                               OnChange="OnFileSelected" disabled="@isBusy" />
+
+                    <div class="d-flex flex-wrap gap-2 mt-3">
+                        <button type="button" class="btn btn-primary" @onclick="SaveLogo"
+                                disabled="@(isBusy || pendingBase64 == null)">
+                            @if (isBusy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                                <span>Procesando...</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-check-lg me-1" aria-hidden="true"></i>
+                                <span>Guardar logo</span>
+                            }
+                        </button>
+                        @if (currentLogo != null)
+                        {
+                            <button type="button" class="btn btn-outline-danger" @onclick="AskRemove" disabled="@isBusy">
+                                <i class="bi bi-trash me-1" aria-hidden="true"></i> Quitar logo
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <div class="logo-previews">
+                    @if (previewUri != null)
+                    {
+                        <figure class="logo-preview logo-preview--dark">
+                            <div class="logo-preview-stage">
+                                <span class="app-logo app-logo--sidebar"><img src="@previewUri" alt="Vista previa del logo en el menú lateral" /></span>
+                            </div>
+                            <figcaption>Menú lateral</figcaption>
+                        </figure>
+                        <figure class="logo-preview logo-preview--light">
+                            <div class="logo-preview-stage">
+                                <span class="app-logo app-logo--hero"><img src="@previewUri" alt="Vista previa del logo en Inicio" /></span>
+                            </div>
+                            <figcaption>Inicio</figcaption>
+                        </figure>
+                    }
+                    else
+                    {
+                        <div class="logo-empty">
+                            <i class="bi bi-image" aria-hidden="true"></i>
+                            <p class="mb-0">Todavía no hay logo. Elige una imagen para ver cómo queda en el menú y en Inicio.</p>
+                        </div>
+                    }
+                </div>
+            </div>
+            @if (pendingBase64 != null)
+            {
+                <p class="text-muted small mt-3 mb-0">Vista previa del resultado: aún no se ha guardado.</p>
+            }
+        </div>
+    </section>
+
+    <section class="card mt-4" aria-labelledby="base-country-title">
+        <div class="card-body">
+            <h2 class="h5" id="base-country-title">País base</h2>
+            <p class="text-muted">Su divisa es la de los totales de la aplicación. Las empresas en otra divisa se convierten a ella con el tipo de cambio de la tarjeta siguiente.</p>
+
+            @if (countries.Count == 0)
+            {
+                <p class="text-muted mb-0">No hay países en el catálogo. Añade alguno en <a href="/settings/countries">Países</a> para elegir el país base.</p>
+            }
+            else
+            {
+                @if (baseInfo.IsFallback)
+                {
+                    <div class="alert alert-warning" role="status">
+                        El país base guardado (@baseInfo.CountryCode) ya no existe en el catálogo. Mientras tanto los totales usan EUR.
+                    </div>
+                }
+                <div class="d-flex flex-wrap align-items-end gap-2">
+                    <div>
+                        <label for="base-country" class="form-label">País</label>
+                        <select id="base-country" class="form-select" @bind="selectedBaseCountry" disabled="@isBusy">
+                            <option value="">-- Seleccione un país --</option>
+                            @foreach (var country in countries)
+                            {
+                                <option value="@country.Code">@country.Name (@country.Code) · @CurrencyFormatter.Label(country.CurrencyCode)</option>
+                            }
+                        </select>
+                    </div>
+                    <button type="button" class="btn btn-primary" @onclick="SaveBaseCountry"
+                            disabled="@(isBusy || string.IsNullOrEmpty(selectedBaseCountry))">
+                        <i class="bi bi-check-lg me-1" aria-hidden="true"></i> Guardar
+                    </button>
+                </div>
+                <p class="text-muted small mt-2 mb-0">Divisa base actual: <strong>@CurrencyFormatter.Label(baseInfo.CurrencyCode)</strong></p>
+            }
+        </div>
+    </section>
+
+    <section class="card mt-4" aria-labelledby="exchange-rates-title">
+        <div class="card-body">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <div>
+                    <h2 class="h5" id="exchange-rates-title">Tipos de cambio</h2>
+                    <p class="text-muted mb-0">Cuántas unidades de @CurrencyFormatter.Label(baseInfo.CurrencyCode) vale 1 unidad de cada divisa de tus empresas. Se usan para convertir los totales.</p>
+                </div>
+                <button type="button" class="btn btn-outline-primary" @onclick="RefreshAllRates"
+                        disabled="@(isBusy || rateRows.Count == 0)">
+                    <i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i> Actualizar todos
+                </button>
+            </div>
+
+            @if (rateRows.Count == 0)
+            {
+                <p class="text-muted mt-3 mb-0">Ninguna empresa usa una divisa distinta de la base, así que no hace falta ningún tipo de cambio.</p>
+            }
+            else
+            {
+                <div class="table-responsive mt-3">
+                    <table class="table align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Divisa</th>
+                                <th>Tipo actual</th>
+                                <th>Origen y fecha</th>
+                                <th>Escribir a mano</th>
+                                <th class="text-end">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in rateRows)
+                            {
+                                <tr>
+                                    <td>
+                                        <strong>@CurrencyFormatter.Label(row.CurrencyCode)</strong>
+                                        <div class="small text-muted">@row.CompaniesCount @(row.CompaniesCount == 1 ? "empresa" : "empresas")</div>
+                                    </td>
+                                    <td>
+                                        @if (row.Rate == null)
+                                        {
+                                            <span class="text-muted">Sin tipo</span>
+                                        }
+                                        else
+                                        {
+                                            <span>1 @row.CurrencyCode = @row.Rate.Rate.ToString("0.######") @row.BaseCurrencyCode</span>
+                                        }
+                                    </td>
+                                    <td class="small text-muted">
+                                        @if (row.Rate != null)
+                                        {
+                                            <span>@row.Rate.SourceLabel · @row.Rate.UpdatedAt.ToString("dd/MM/yyyy HH:mm")</span>
+                                        }
+                                    </td>
+                                    <td style="max-width: 11rem;">
+                                        <input class="form-control form-control-sm"
+                                               inputmode="decimal"
+                                               placeholder="Ej.: 0,92"
+                                               aria-label="Tipo de cambio manual de @row.CurrencyCode"
+                                               @bind="manualRates[row.CurrencyCode]"
+                                               disabled="@isBusy" />
+                                    </td>
+                                    <td class="text-end">
+                                        <div class="btn-group" role="group">
+                                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                                    @onclick="() => RefreshRate(row.CurrencyCode)" disabled="@isBusy"
+                                                    title="Actualizar desde Yahoo">
+                                                <i class="bi bi-arrow-repeat" aria-hidden="true"></i> Actualizar
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-primary"
+                                                    @onclick="() => SaveManualRate(row.CurrencyCode)" disabled="@isBusy"
+                                                    title="Guardar el valor escrito">
+                                                <i class="bi bi-check-lg" aria-hidden="true"></i> Guardar
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="card mt-4" aria-labelledby="ai-title">
+        <div class="card-body">
+            <h2 class="h5" id="ai-title">Lectura de facturas con IA</h2>
+            <p class="text-muted">Opcional. Con una clave de API de Claude puedes leer la empresa, el importe y la fecha de los recibos y facturas de tus inmuebles. Sin clave, todo lo demás funciona igual.</p>
+            <div class="alert alert-info" role="note">
+                Al leer un documento, este se envía a Anthropic (servicio externo en internet) y el uso se factura a tu clave de API. Siempre se te pedirá confirmación antes de enviarlo.
+                La clave se guarda solo en el almacén seguro de este dispositivo: no va a la base de datos ni a las copias de seguridad, así que hay que volver a escribirla en cada dispositivo.
+            </div>
+
+            <div class="d-flex flex-wrap align-items-end gap-2">
+                <div>
+                    <label for="ai-key" class="form-label">Clave de API</label>
+                    <input id="ai-key" type="password" class="form-control" autocomplete="off"
+                           placeholder="@(maskedKey ?? "sk-ant-...")" @bind="newApiKey" disabled="@isBusy" />
+                </div>
+                <button type="button" class="btn btn-primary" @onclick="SaveApiKey"
+                        disabled="@(isBusy || string.IsNullOrWhiteSpace(newApiKey))">
+                    <i class="bi bi-check-lg me-1" aria-hidden="true"></i> Guardar clave
+                </button>
+                @if (maskedKey != null)
+                {
+                    <button type="button" class="btn btn-outline-danger" @onclick="RemoveApiKey" disabled="@isBusy">
+                        <i class="bi bi-trash me-1" aria-hidden="true"></i> Quitar clave
+                    </button>
+                }
+            </div>
+            <p class="text-muted small mt-2 mb-3">@(maskedKey != null ? $"Clave guardada: {maskedKey}" : "No hay clave guardada: la lectura con IA está desactivada.")</p>
+
+            <div class="d-flex flex-wrap align-items-end gap-2">
+                <div>
+                    <label for="ai-model" class="form-label">Modelo</label>
+                    <input id="ai-model" type="text" class="form-control" @bind="aiModel" disabled="@isBusy" />
+                </div>
+                <button type="button" class="btn btn-outline-primary" @onclick="SaveAiModel" disabled="@isBusy">
+                    <i class="bi bi-check-lg me-1" aria-hidden="true"></i> Guardar modelo
+                </button>
+            </div>
+            <p class="text-muted small mt-2 mb-0">Déjalo vacío para usar el modelo por defecto (claude-haiku-4-5-20251001).</p>
+        </div>
+    </section>
+
+    <section class="card mt-4" aria-labelledby="market-catalog-title">
+        <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <div>
+                <h2 class="h5" id="market-catalog-title">Catálogo de mercado</h2>
+                <p class="text-muted mb-0">Empresas de IBEX 35, CAC 40, DAX 40, EURO STOXX 50, S&amp;P 500, Dow Jones y Nasdaq-100 para dar de alta sin escribir el ticker.</p>
+            </div>
+            <a class="btn btn-outline-primary" href="/settings/market-catalog">
+                <i class="bi bi-collection me-1" aria-hidden="true"></i> Ver catálogo
+            </a>
+        </div>
+    </section>
+
+    <section class="card mt-4" aria-labelledby="countries-title">
+        <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <div>
+                <h2 class="h5" id="countries-title">Países</h2>
+                <p class="text-muted mb-0">Catálogo de países con su región y divisa. Cada empresa elige uno.</p>
+            </div>
+            <a class="btn btn-outline-primary" href="/settings/countries">
+                <i class="bi bi-globe-europe-africa me-1" aria-hidden="true"></i> Gestionar países
+            </a>
+        </div>
+    </section>
+</div>
+
+<!-- Modal de confirmación para quitar el logo -->
+<div class="modal fade @(showRemoveModal ? "show d-block" : "")"
+     tabindex="-1"
+     style="@(showRemoveModal ? "background-color: rgba(0,0,0,0.5);" : "")">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2" aria-hidden="true"></i>
+                    Quitar logo
+                </h5>
+                <button type="button" class="btn-close btn-close-white" aria-label="Cerrar" @onclick="CancelRemove"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0">¿Quitar el logo de la aplicación? El menú, Inicio y el Dashboard volverán a su aspecto original.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @onclick="CancelRemove" disabled="@isBusy">Cancelar</button>
+                <button type="button" class="btn btn-danger" @onclick="RemoveLogo" disabled="@isBusy">
+                    <i class="bi bi-trash me-1" aria-hidden="true"></i> Quitar logo
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private AppLogoImage? currentLogo;
+    private string? pendingBase64;
+    private string? pendingContentType;
+    private string? errorMessage;
+    private string? infoMessage;
+    private bool isBusy;
+    private bool showRemoveModal;
+
+    /// <summary>Vista previa: el resultado pendiente de guardar o, si no hay, el logo actual</summary>
+    private string? previewUri => pendingBase64 != null
+        ? $"data:{pendingContentType};base64,{pendingBase64}"
+        : currentLogo?.DataUri;
+
+    private List<Country> countries = new();
+    private BaseCurrencyInfo baseInfo = new();
+    private string selectedBaseCountry = string.Empty;
+
+    // Lectura de facturas con IA (SPEC-14-01)
+    private string? maskedKey;
+    private string newApiKey = string.Empty;
+    private string aiModel = string.Empty;
+
+    // Tipos de cambio (SPEC-01-03)
+    private List<ExchangeRateRow> rateRows = new();
+    private Dictionary<string, string> manualRates = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        AppSettings.LogoChanged += OnLogoChanged;
+        currentLogo = await AppSettings.GetLogoAsync();
+        await LoadCountries();
+        await LoadRates();
+        await LoadAiSettings();
+    }
+
+    private async Task LoadAiSettings()
+    {
+        maskedKey = await ApiKeyStore.GetMaskedKeyAsync();
+        aiModel = await AppSettings.GetAiModelAsync();
+    }
+
+    private async Task SaveApiKey()
+    {
+        ClearMessages();
+        isBusy = true;
+        try
+        {
+            var result = await ApiKeyStore.SaveKeyAsync(newApiKey);
+            if (result.Success)
+            {
+                newApiKey = string.Empty;
+                infoMessage = "Clave de API guardada. La lectura con IA está activada.";
+            }
+            else
+            {
+                errorMessage = result.ErrorMessage;
+            }
+            await LoadAiSettings();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task RemoveApiKey()
+    {
+        ClearMessages();
+        isBusy = true;
+        try
+        {
+            var result = await ApiKeyStore.RemoveKeyAsync();
+            if (result.Success)
+            {
+                infoMessage = "Clave de API eliminada. La lectura con IA está desactivada.";
+            }
+            else
+            {
+                errorMessage = result.ErrorMessage;
+            }
+            await LoadAiSettings();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task SaveAiModel()
+    {
+        ClearMessages();
+        isBusy = true;
+        try
+        {
+            var result = await AppSettings.SaveAiModelAsync(aiModel);
+            if (result.Success)
+            {
+                infoMessage = "Modelo guardado.";
+            }
+            else
+            {
+                errorMessage = result.ErrorMessage;
+            }
+            await LoadAiSettings();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task LoadRates()
+    {
+        try
+        {
+            rateRows = await ExchangeRateService.GetRowsAsync();
+            manualRates = rateRows.ToDictionary(r => r.CurrencyCode, _ => string.Empty);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al cargar los tipos de cambio: {ex.Message}");
+            errorMessage = "No se pudieron cargar los tipos de cambio.";
+        }
+    }
+
+    private async Task RefreshRate(string currencyCode)
+    {
+        if (isBusy)
+        {
+            return;
+        }
+
+        ClearMessages();
+        isBusy = true;
+        try
+        {
+            var result = await ExchangeRateService.RefreshAsync(currencyCode);
+            if (result.Success)
+            {
+                infoMessage = $"Tipo {currencyCode} actualizado desde Yahoo.";
+            }
+            else
+            {
+                errorMessage = result.Error;
+            }
+            await LoadRates();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task RefreshAllRates()
+    {
+        if (isBusy)
+        {
+            return;
+        }
+
+        ClearMessages();
+        isBusy = true;
+        try
+        {
+            var failures = new List<string>();
+            var ok = await ExchangeRateService.RefreshAllAsync(async (currency, result) =>
+            {
+                if (!result.Success)
+                {
+                    failures.Add(currency);
+                }
+                await Task.CompletedTask;
+            });
+            infoMessage = $"Tipos actualizados: {ok}.";
+            if (failures.Count > 0)
+            {
+                errorMessage = $"No se pudo actualizar: {string.Join(", ", failures)}. Se conserva el tipo anterior; puedes escribirlo a mano.";
+            }
+            await LoadRates();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task SaveManualRate(string currencyCode)
+    {
+        if (isBusy)
+        {
+            return;
+        }
+
+        ClearMessages();
+        manualRates.TryGetValue(currencyCode, out var text);
+        text = text?.Trim().Replace(',', '.');
+        if (!decimal.TryParse(text, System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var rate))
+        {
+            errorMessage = "Escribe el tipo de cambio como un número (por ejemplo 0,92).";
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var result = await ExchangeRateService.SaveManualAsync(currencyCode, rate);
+            if (result.Success)
+            {
+                infoMessage = $"Tipo {currencyCode} guardado a mano.";
+                await LoadRates();
+            }
+            else
+            {
+                errorMessage = result.Error;
+            }
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task LoadCountries()
+    {
+        try
+        {
+            countries = await CountryService.GetAllAsync();
+            baseInfo = await CountryService.GetBaseCurrencyAsync();
+            selectedBaseCountry = baseInfo.IsFallback ? string.Empty : baseInfo.CountryCode;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al cargar los países: {ex.Message}");
+            errorMessage = "No se pudo cargar el catálogo de países.";
+        }
+    }
+
+    private async Task SaveBaseCountry()
+    {
+        if (isBusy || string.IsNullOrEmpty(selectedBaseCountry))
+        {
+            return;
+        }
+
+        ClearMessages();
+        isBusy = true;
+        try
+        {
+            var result = await AppSettings.SaveBaseCountryCodeAsync(selectedBaseCountry);
+            if (result.Success)
+            {
+                baseInfo = await CountryService.GetBaseCurrencyAsync();
+                infoMessage = $"País base guardado. Los totales se muestran ahora en {CurrencyFormatter.Label(baseInfo.CurrencyCode)}.";
+                await LoadRates();
+            }
+            else
+            {
+                errorMessage = result.ErrorMessage;
+            }
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void OnLogoChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            currentLogo = await AppSettings.GetLogoAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void ClearMessages()
+    {
+        errorMessage = null;
+        infoMessage = null;
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        ClearMessages();
+        pendingBase64 = null;
+        pendingContentType = null;
+
+        var file = e.File;
+        var type = (file.ContentType ?? string.Empty).ToLowerInvariant();
+
+        if (type != "image/png" && type != "image/jpeg" && type != "image/webp")
+        {
+            errorMessage = "Formato no admitido. Sube una imagen PNG, JPG o WebP.";
+            return;
+        }
+
+        if (file.Size > AppLogoLimits.MaxUploadBytes)
+        {
+            errorMessage = "La imagen pesa más de 2 MB. Reduce su tamaño y vuelve a subirla.";
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await using var stream = file.OpenReadStream(AppLogoLimits.MaxUploadBytes);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            var base64 = Convert.ToBase64String(memory.ToArray());
+
+            var result = await JS.InvokeAsync<LogoProcessResult>(
+                "logoTools.processLogo", base64, type, AppLogoLimits.MaxSide, AppLogoLimits.MaxInputSide);
+
+            if (result.Error == "too-large")
+            {
+                errorMessage = "La imagen es demasiado grande (más de 6000 px por lado). Reduce su tamaño y vuelve a subirla.";
+            }
+            else if (result.Error != null || string.IsNullOrEmpty(result.Base64))
+            {
+                errorMessage = "No se pudo leer la imagen. Comprueba que no esté dañada y vuelve a subirla.";
+            }
+            else
+            {
+                pendingBase64 = result.Base64;
+                pendingContentType = result.ContentType ?? type;
+                if (!result.Trimmed)
+                {
+                    infoMessage = "No se han podido recortar los márgenes de esta imagen: se guardará tal cual.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al procesar el logo: {ex.Message}");
+            errorMessage = "No se pudo procesar la imagen. No se ha modificado ningún dato.";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task SaveLogo()
+    {
+        if (pendingBase64 == null || isBusy)
+        {
+            return;
+        }
+
+        ClearMessages();
+        isBusy = true;
+        try
+        {
+            var bytes = Convert.FromBase64String(pendingBase64);
+            var result = await AppSettings.SaveLogoAsync(bytes, pendingContentType ?? "image/png");
+            if (result.Success)
+            {
+                pendingBase64 = null;
+                pendingContentType = null;
+                currentLogo = await AppSettings.GetLogoAsync();
+                infoMessage = "Logo guardado.";
+            }
+            else
+            {
+                errorMessage = result.ErrorMessage;
+            }
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void AskRemove()
+    {
+        showRemoveModal = true;
+    }
+
+    private void CancelRemove()
+    {
+        showRemoveModal = false;
+    }
+
+    private async Task RemoveLogo()
+    {
+        if (isBusy)
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var result = await AppSettings.RemoveLogoAsync();
+            showRemoveModal = false;
+            if (result.Success)
+            {
+                pendingBase64 = null;
+                pendingContentType = null;
+                currentLogo = null;
+                ClearMessages();
+                infoMessage = "Logo quitado.";
+            }
+            else
+            {
+                errorMessage = result.ErrorMessage;
+            }
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        AppSettings.LogoChanged -= OnLogoChanged;
+    }
+
+    /// <summary>Resultado de logoTools.processLogo (propiedades en camelCase en JS)</summary>
+    private sealed class LogoProcessResult
+    {
+        public string? Base64 { get; set; }
+        public string? ContentType { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public bool Trimmed { get; set; }
+        public string? Error { get; set; }
+    }
+}

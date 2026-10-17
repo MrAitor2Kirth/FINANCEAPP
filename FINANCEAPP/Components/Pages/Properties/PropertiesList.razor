@@ -3,6 +3,7 @@
 @using FINANCEAPP.Services
 @using Microsoft.Extensions.Logging
 @inject IPropertyService PropertyService
+@inject IPropertyDocumentService DocumentService
 @inject NavigationManager Navigation
 @inject ILogger<PropertiesList> Logger
 
@@ -44,19 +45,19 @@
         <div class="stat-grid">
             <div class="stat-card" style="--swatch:var(--plum)">
                 <p class="stat-label">Inversión total</p>
-                <p class="stat-value">@totalInvested.ToString("C")</p>
+                <p class="stat-value">@CurrencyFormatter.Format(totalInvested, null)</p>
             </div>
             <div class="stat-card" style="--swatch:var(--teal)">
                 <p class="stat-label">Ingresos</p>
-                <p class="stat-value text-success">@totalIncome.ToString("C")</p>
+                <p class="stat-value text-success">@CurrencyFormatter.Format(totalIncome, null)</p>
             </div>
             <div class="stat-card" style="--swatch:var(--amber)">
                 <p class="stat-label">Gastos</p>
-                <p class="stat-value text-danger">@totalExpenses.ToString("C")</p>
+                <p class="stat-value text-danger">@CurrencyFormatter.Format(totalExpenses, null)</p>
             </div>
             <div class="stat-card" style="--swatch:var(--sage)">
                 <p class="stat-label">Resultado neto</p>
-                <p class="stat-value @(netResult >= 0 ? "text-success" : "text-danger")">@netResult.ToString("C")</p>
+                <p class="stat-value @(netResult >= 0 ? "text-success" : "text-danger")">@CurrencyFormatter.Format(netResult, null)</p>
             </div>
         </div>
 
@@ -89,11 +90,11 @@
                                     @property.Status
                                 </span>
                             </td>
-                            <td class="text-end">@property.PurchasePrice.ToString("C")</td>
-                            <td class="text-end text-success">@property.TotalIncome.ToString("C")</td>
-                            <td class="text-end text-danger">@property.TotalInvested.ToString("C")</td>
+                            <td class="text-end">@CurrencyFormatter.Format(property.PurchasePrice, null)</td>
+                            <td class="text-end text-success">@CurrencyFormatter.Format(property.TotalIncome, null)</td>
+                            <td class="text-end text-danger">@CurrencyFormatter.Format(property.TotalInvested - property.PurchasePrice, null)</td>
                             <td class="text-end fw-bold @(property.NetResult >= 0 ? "text-success" : "text-danger")">
-                                @property.NetResult.ToString("C")
+                                @CurrencyFormatter.Format(property.NetResult, null)
                             </td>
                             <td>
                                 <button class="btn btn-sm btn-outline-primary" @onclick="() => NavigateToDetail(property.Id)">
@@ -104,8 +105,9 @@
                                 </button>
                                 @if (property.Status != "Vendida")
                                 {
-                                    <button class="btn btn-sm btn-outline-success" @onclick="() => SellProperty(property.Id)">
-                                        Vender
+                                    <button class="btn btn-sm btn-outline-success" @onclick="() => SellProperty(property.Id)"
+                                            title="Vender" aria-label="Vender">
+                                        <i class="bi bi-cash-coin" aria-hidden="true"></i>
                                     </button>
                                 }
                                 <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteProperty(property.Id)">
@@ -121,6 +123,7 @@
                                     <div class="p-3">
                                         <h6 class="mb-3">Detalle de Operaciones</h6>
                                         <PropertyOperationsList PropertyName="@property.Name" PropertyService="@PropertyService" OnOperationAdded="@RefreshProperties" />
+                                        <PropertyDocumentsPanel PropertyId="@property.Id" PropertyName="@property.Name" OnExpenseCreated="@RefreshProperties" />
                                     </div>
                                 </td>
                             </tr>
@@ -161,8 +164,9 @@
             properties = await PropertyService.GetAllPropertiesAsync();
             totalInvested = properties.Sum(p => p.TotalInvested);
             totalIncome = properties.Sum(p => p.TotalIncome);
-            totalExpenses = totalInvested;
-            netResult = totalIncome - totalExpenses;
+            // Gastos = lo invertido por encima del precio de compra (antes se mostraba el total invertido)
+            totalExpenses = properties.Sum(p => p.TotalInvested - p.PurchasePrice);
+            netResult = totalIncome - totalInvested;
             isLoading = false;
         }
         catch (Exception ex)
@@ -196,7 +200,12 @@
 
     private async Task DeleteProperty(int propertyId)
     {
-        if (await JSRuntime.InvokeAsync<bool>("confirm", "¿Estás seguro de que deseas eliminar esta propiedad?"))
+        var documentCount = await DocumentService.CountByPropertyAsync(propertyId);
+        var confirmText = documentCount > 0
+            ? $"¿Estás seguro de que deseas eliminar esta propiedad? También se eliminarán sus {documentCount} documento(s) adjunto(s) y no se podrán recuperar."
+            : "¿Estás seguro de que deseas eliminar esta propiedad?";
+
+        if (await JSRuntime.InvokeAsync<bool>("confirm", confirmText))
         {
             try
             {

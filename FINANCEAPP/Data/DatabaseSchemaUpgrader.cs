@@ -164,6 +164,541 @@ namespace FINANCEAPP.Data
             }
         }
 
+        /// <summary>
+        /// Añade a la tabla Operations las columnas SaleHistoryId y OriginOperationId (nulas) y el índice
+        /// de SaleHistoryId si faltan. No modifica ni borra datos existentes.
+        /// </summary>
+        public static void EnsureOperationSaleColumns(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var existingColumns = GetExistingColumns(connection, "Operations");
+
+                AddColumnIfMissing(connection, existingColumns, "Operations", "SaleHistoryId", "INTEGER NULL");
+                AddColumnIfMissing(connection, existingColumns, "Operations", "OriginOperationId", "INTEGER NULL");
+
+                using var command = connection.CreateCommand();
+                command.CommandText = @"CREATE INDEX IF NOT EXISTS ""IX_Operations_SaleHistoryId"" ON ""Operations"" (""SaleHistoryId"");";
+                command.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Crea la tabla AppSettings si no existe todavía (ajustes de la aplicación, por ahora el logo).
+        /// No modifica ni borra datos existentes.
+        /// </summary>
+        public static void EnsureAppSettingsTable(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""AppSettings"" (
+                        ""Key"" TEXT NOT NULL CONSTRAINT ""PK_AppSettings"" PRIMARY KEY,
+                        ""TextValue"" TEXT NULL,
+                        ""BinaryValue"" BLOB NULL,
+                        ""UpdatedAt"" TEXT NOT NULL
+                    );
+                ";
+                command.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Crea la tabla Countries si no existe y, una sola vez (marca CountriesSeeded en AppSettings),
+        /// la rellena con 14 países de partida y fija ES como país base. Debe ejecutarse después de
+        /// EnsureAppSettingsTable. Si el usuario borra después un país sembrado, no se vuelve a crear.
+        /// </summary>
+        public static void EnsureCountriesTable(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using (var create = connection.CreateCommand())
+                {
+                    create.CommandText = @"
+                        CREATE TABLE IF NOT EXISTS ""Countries"" (
+                            ""Code"" TEXT NOT NULL CONSTRAINT ""PK_Countries"" PRIMARY KEY,
+                            ""Name"" TEXT NOT NULL,
+                            ""Region"" TEXT NOT NULL,
+                            ""CurrencyCode"" TEXT NOT NULL,
+                            ""CreatedAt"" TEXT NOT NULL,
+                            ""UpdatedAt"" TEXT NOT NULL
+                        );
+
+                        CREATE UNIQUE INDEX IF NOT EXISTS ""IX_Countries_Name"" ON ""Countries"" (""Name"" COLLATE NOCASE);
+                    ";
+                    create.ExecuteNonQuery();
+                }
+
+                bool seeded;
+                using (var check = connection.CreateCommand())
+                {
+                    check.CommandText = @"SELECT COUNT(1) FROM ""AppSettings"" WHERE ""Key"" = 'CountriesSeeded';";
+                    seeded = Convert.ToInt32(check.ExecuteScalar()) > 0;
+                }
+
+                if (seeded)
+                {
+                    return;
+                }
+
+                var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fffffff");
+                var rows = new (string Code, string Name, string Region, string Currency)[]
+                {
+                    ("ES", "España", "EU", "EUR"),
+                    ("DE", "Alemania", "EU", "EUR"),
+                    ("FR", "Francia", "EU", "EUR"),
+                    ("IT", "Italia", "EU", "EUR"),
+                    ("NL", "Países Bajos", "EU", "EUR"),
+                    ("PT", "Portugal", "EU", "EUR"),
+                    ("IE", "Irlanda", "EU", "EUR"),
+                    ("BE", "Bélgica", "EU", "EUR"),
+                    ("GB", "Reino Unido", "EU", "GBP"),
+                    ("CH", "Suiza", "EU", "CHF"),
+                    ("US", "Estados Unidos", "AMERICA", "USD"),
+                    ("CA", "Canadá", "AMERICA", "CAD"),
+                    ("JP", "Japón", "ASIA", "JPY"),
+                    ("BR", "Brasil", "SUDAMERICA", "BRL")
+                };
+
+                using var transaction = connection.BeginTransaction();
+
+                foreach (var row in rows)
+                {
+                    using var insert = connection.CreateCommand();
+                    insert.Transaction = transaction;
+                    insert.CommandText = @"INSERT OR IGNORE INTO ""Countries"" (""Code"", ""Name"", ""Region"", ""CurrencyCode"", ""CreatedAt"", ""UpdatedAt"")
+                                           VALUES ($code, $name, $region, $currency, $now, $now);";
+                    AddParameter(insert, "$code", row.Code);
+                    AddParameter(insert, "$name", row.Name);
+                    AddParameter(insert, "$region", row.Region);
+                    AddParameter(insert, "$currency", row.Currency);
+                    AddParameter(insert, "$now", now);
+                    insert.ExecuteNonQuery();
+                }
+
+                using (var mark = connection.CreateCommand())
+                {
+                    mark.Transaction = transaction;
+                    mark.CommandText = @"INSERT OR IGNORE INTO ""AppSettings"" (""Key"", ""TextValue"", ""UpdatedAt"") VALUES ('CountriesSeeded', '1', $now),
+                                                                                                                         ('BaseCountryCode', 'ES', $now);";
+                    AddParameter(mark, "$now", now);
+                    mark.ExecuteNonQuery();
+                }
+
+                transaction.Commit();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Añade a CompanyDetails la columna CountryCode (nula) si falta. No modifica datos existentes.
+        /// </summary>
+        public static void EnsureCompanyCountryColumn(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var existingColumns = GetExistingColumns(connection, "CompanyDetails");
+                AddColumnIfMissing(connection, existingColumns, "CompanyDetails", "CountryCode", "TEXT NULL");
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Añade a Operations la columna CurrencyCode (nula = EUR) si falta. No modifica datos existentes.
+        /// </summary>
+        public static void EnsureOperationCurrencyColumn(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var existingColumns = GetExistingColumns(connection, "Operations");
+                AddColumnIfMissing(connection, existingColumns, "Operations", "CurrencyCode", "TEXT NULL");
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Crea la tabla ExchangeRates si no existe (SPEC-01-03). No toca ningún dato existente.
+        /// </summary>
+        public static void EnsureExchangeRatesTable(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var create = connection.CreateCommand();
+                create.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""ExchangeRates"" (
+                        ""CurrencyCode"" TEXT NOT NULL,
+                        ""BaseCurrencyCode"" TEXT NOT NULL,
+                        ""Rate"" decimal(18,6) NOT NULL,
+                        ""Source"" TEXT NOT NULL,
+                        ""UpdatedAt"" TEXT NOT NULL,
+                        CONSTRAINT ""PK_ExchangeRates"" PRIMARY KEY (""CurrencyCode"", ""BaseCurrencyCode"")
+                    );
+                ";
+                create.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Crea la tabla PropertyDocuments (documentos adjuntos a inmuebles) si no existe (SPEC-14-01).
+        /// No toca ninguna otra tabla ni dato.
+        /// </summary>
+        public static void EnsurePropertyDocumentsTable(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var create = connection.CreateCommand();
+                create.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""PropertyDocuments"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_PropertyDocuments"" PRIMARY KEY AUTOINCREMENT,
+                        ""PropertyId"" INTEGER NOT NULL,
+                        ""FileName"" TEXT NOT NULL,
+                        ""ContentType"" TEXT NOT NULL,
+                        ""SizeBytes"" INTEGER NOT NULL,
+                        ""Content"" BLOB NOT NULL,
+                        ""Description"" TEXT NULL,
+                        ""UploadedAt"" TEXT NOT NULL,
+                        ""ExtractedCompany"" TEXT NULL,
+                        ""ExtractedAmount"" decimal(18,2) NULL,
+                        ""ExtractedDate"" TEXT NULL,
+                        ""ExtractedType"" TEXT NULL,
+                        ""AiReadAt"" TEXT NULL,
+                        ""PropertyOperationId"" INTEGER NULL
+                    );
+                ";
+                create.ExecuteNonQuery();
+
+                using var index = connection.CreateCommand();
+                index.CommandText = @"CREATE INDEX IF NOT EXISTS ""IX_PropertyDocuments_PropertyId"" ON ""PropertyDocuments"" (""PropertyId"");";
+                index.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Crea la tabla WealthSnapshots (capturas mensuales del patrimonio, SPEC-17-01) y su índice
+        /// único por año y mes si no existen. No toca ninguna otra tabla ni dato.
+        /// </summary>
+        public static void EnsureWealthSnapshotsTable(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var create = connection.CreateCommand();
+                create.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""WealthSnapshots"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_WealthSnapshots"" PRIMARY KEY AUTOINCREMENT,
+                        ""Year"" INTEGER NOT NULL,
+                        ""Month"" INTEGER NOT NULL,
+                        ""CapturedAt"" TEXT NOT NULL,
+                        ""CurrencyCode"" TEXT NOT NULL,
+                        ""TotalPatrimony"" decimal(18,2) NOT NULL,
+                        ""TotalInvested"" decimal(18,2) NOT NULL,
+                        ""StocksValue"" decimal(18,2) NOT NULL,
+                        ""StocksInvested"" decimal(18,2) NOT NULL,
+                        ""FundsValue"" decimal(18,2) NOT NULL,
+                        ""FundsInvested"" decimal(18,2) NOT NULL,
+                        ""BankBalance"" decimal(18,2) NOT NULL,
+                        ""SafeHavenValue"" decimal(18,2) NOT NULL,
+                        ""SafeHavenInvested"" decimal(18,2) NOT NULL,
+                        ""RealEstateValue"" decimal(18,2) NOT NULL,
+                        ""RealEstateInvested"" decimal(18,2) NOT NULL,
+                        ""ExcludedCompanies"" INTEGER NOT NULL DEFAULT 0,
+                        ""Note"" TEXT NULL,
+                        ""CreatedAt"" TEXT NOT NULL,
+                        ""UpdatedAt"" TEXT NOT NULL
+                    );
+                ";
+                create.ExecuteNonQuery();
+
+                using var index = connection.CreateCommand();
+                index.CommandText = @"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_WealthSnapshots_Year_Month"" ON ""WealthSnapshots"" (""Year"", ""Month"");";
+                index.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Añade las columnas nulas ExchangeRate y ExchangeRateTo a Operations si faltan (SPEC-01-03).
+        /// Las operaciones existentes se quedan sin tipo de cambio.
+        /// </summary>
+        public static void EnsureOperationExchangeRateColumns(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var existingColumns = GetExistingColumns(connection, "Operations");
+                AddColumnIfMissing(connection, existingColumns, "Operations", "ExchangeRate", "decimal(18,6) NULL");
+                AddColumnIfMissing(connection, existingColumns, "Operations", "ExchangeRateTo", "TEXT NULL");
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Crea la tabla MarketCompanies si no existe y la carga desde MarketCatalogData cuando la versión
+        /// guardada en AppSettings (clave MarketCatalogVersion) es distinta de la de la aplicación.
+        /// El catálogo es de solo lectura, así que se rehace entero en una transacción; no toca
+        /// CompanyDetails ni Operations. Debe ejecutarse después de EnsureAppSettingsTable.
+        /// </summary>
+        public static void EnsureMarketCatalogTable(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using (var create = connection.CreateCommand())
+                {
+                    create.CommandText = @"
+                        CREATE TABLE IF NOT EXISTS ""MarketCompanies"" (
+                            ""Ticker"" TEXT NOT NULL COLLATE NOCASE CONSTRAINT ""PK_MarketCompanies"" PRIMARY KEY,
+                            ""Name"" TEXT NOT NULL,
+                            ""CountryCode"" TEXT NOT NULL,
+                            ""Indices"" TEXT NOT NULL
+                        );
+                    ";
+                    create.ExecuteNonQuery();
+                }
+
+                string? savedVersion;
+                using (var check = connection.CreateCommand())
+                {
+                    check.CommandText = @"SELECT ""TextValue"" FROM ""AppSettings"" WHERE ""Key"" = 'MarketCatalogVersion';";
+                    savedVersion = check.ExecuteScalar() as string;
+                }
+
+                if (savedVersion == MarketCatalogData.Version)
+                {
+                    return;
+                }
+
+                using var transaction = connection.BeginTransaction();
+
+                using (var clear = connection.CreateCommand())
+                {
+                    clear.Transaction = transaction;
+                    clear.CommandText = @"DELETE FROM ""MarketCompanies"";";
+                    clear.ExecuteNonQuery();
+                }
+
+                using (var insert = connection.CreateCommand())
+                {
+                    insert.Transaction = transaction;
+                    insert.CommandText = @"INSERT INTO ""MarketCompanies"" (""Ticker"", ""Name"", ""CountryCode"", ""Indices"")
+                                           VALUES ($ticker, $name, $country, $indices)
+                                           ON CONFLICT(""Ticker"") DO UPDATE SET ""Name"" = excluded.""Name"",
+                                               ""CountryCode"" = excluded.""CountryCode"", ""Indices"" = excluded.""Indices"";";
+                    var ticker = AddParameter(insert, "$ticker", string.Empty);
+                    var name = AddParameter(insert, "$name", string.Empty);
+                    var country = AddParameter(insert, "$country", string.Empty);
+                    var indices = AddParameter(insert, "$indices", string.Empty);
+
+                    foreach (var entry in MarketCatalogData.Entries)
+                    {
+                        ticker.Value = entry.Ticker;
+                        name.Value = entry.Name;
+                        country.Value = entry.CountryCode;
+                        indices.Value = entry.Indices;
+                        insert.ExecuteNonQuery();
+                    }
+                }
+
+                using (var mark = connection.CreateCommand())
+                {
+                    mark.Transaction = transaction;
+                    mark.CommandText = @"INSERT INTO ""AppSettings"" (""Key"", ""TextValue"", ""UpdatedAt"") VALUES ('MarketCatalogVersion', $version, $now)
+                                         ON CONFLICT(""Key"") DO UPDATE SET ""TextValue"" = excluded.""TextValue"", ""UpdatedAt"" = excluded.""UpdatedAt"";";
+                    AddParameter(mark, "$version", MarketCatalogData.Version);
+                    AddParameter(mark, "$now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fffffff"));
+                    mark.ExecuteNonQuery();
+                }
+
+                transaction.Commit();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Repara el total invertido de los inmuebles creados antes de la corrección de alta: quedaban con
+        /// TotalInvested = 0 y el patrimonio no los sumaba. Solo toca los que tienen un total imposible
+        /// (menor que el precio de compra) y lo deja en precio de compra + gastos. Es idempotente.
+        /// </summary>
+        public static void RepairPropertyTotals(AppDbContext context)
+        {
+            var broken = context.Properties
+                .AsEnumerable()
+                .Where(p => p.TotalInvested < p.PurchasePrice)
+                .ToList();
+
+            if (broken.Count == 0)
+            {
+                return;
+            }
+
+            var expensesByProperty = context.PropertyOperations
+                .Where(o => o.Category == "Gasto")
+                .AsEnumerable()
+                .GroupBy(o => o.PropertyName)
+                .ToDictionary(g => g.Key, g => g.Sum(o => Math.Abs(o.Amount)));
+
+            foreach (var property in broken)
+            {
+                property.TotalInvested = property.PurchasePrice +
+                    (expensesByProperty.TryGetValue(property.Name, out var expenses) ? expenses : 0m);
+                property.UpdatedAt = DateTime.Now;
+            }
+
+            context.SaveChanges();
+            context.ChangeTracker.Clear();
+        }
+
+        private static System.Data.Common.DbParameter AddParameter(System.Data.Common.DbCommand command, string name, string value)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value;
+            command.Parameters.Add(parameter);
+            return parameter;
+        }
+
         private static HashSet<string> GetExistingColumns(System.Data.Common.DbConnection connection, string tableName)
         {
             var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

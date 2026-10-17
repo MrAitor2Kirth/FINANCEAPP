@@ -2,8 +2,10 @@
 @using System.Globalization
 @using FINANCEAPP.Models
 @using FINANCEAPP.Services
+@using FINANCEAPP.Components.Pages.History
 @using Microsoft.Extensions.Logging
 @inject IDashboardService DashboardService
+@inject IWealthSnapshotService WealthSnapshotService
 @inject NavigationManager Navigation
 @inject ILogger<FinancialDashboard> Logger
 
@@ -24,36 +26,79 @@
         var shareBase = shares.Sum(x => Math.Max(x.Value, 0m));
 
         <div class="page-head">
-            <div>
-                <h1>Dashboard</h1>
-                <p class="page-sub">Gestión integral de tu patrimonio · actualizado @summary.LastUpdate.ToString("dd/MM/yyyy HH:mm")</p>
+            <div class="page-head-title">
+                <AppLogo Variant="compact" />
+                <div>
+                    <h1>Dashboard</h1>
+                    <p class="page-sub">Gestión integral de tu patrimonio · actualizado @summary.LastUpdate.ToString("dd/MM/yyyy HH:mm")</p>
+                </div>
             </div>
-            <button class="btn btn-outline-primary" @onclick="RefreshDashboard">
-                <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i> Actualizar
-            </button>
+            <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-primary" @onclick="RefreshDashboard">
+                    <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i> Actualizar
+                </button>
+                <button class="btn btn-primary" @onclick="OpenCapture">
+                    <i class="bi bi-camera me-1" aria-hidden="true"></i> Capturar patrimonio
+                </button>
+            </div>
         </div>
+
+        @if (!string.IsNullOrEmpty(captureMessage))
+        {
+            <div class="alert alert-success alert-dismissible" role="status">
+                <i class="bi bi-check-circle-fill me-2" aria-hidden="true"></i>@captureMessage
+                <a href="/history/wealth" class="ms-2">Ver histórico</a>
+                <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => captureMessage = null"></button>
+            </div>
+        }
 
         <section class="wealth" aria-labelledby="wealth-label">
             <p class="eyebrow" id="wealth-label">Patrimonio total</p>
-            <p class="wealth-total">@summary.TotalPatrimony.ToString("C")</p>
+            <p class="wealth-total">@Money(summary.TotalPatrimony)</p>
+            @if (variation != null)
+            {
+                <p class="wealth-variation @(variation.Amount >= 0 ? "text-success" : "text-danger")">
+                    @(variation.Amount >= 0 ? "▲" : "▼") <span class="num">@Money(variation.Amount)</span>
+                    @if (variation.Percent.HasValue)
+                    {
+                        <span class="num">(@variation.Percent.Value.ToString("N2")%)</span>
+                    }
+                    <span class="text-muted">desde @variation.ComparedToLabel</span>
+                </p>
+            }
             <div class="wealth-band" role="img" aria-label="Reparto del patrimonio por clase de activo">
                 @foreach (var share in shares.Where(x => x.Value > 0m))
                 {
-                    <span class="wealth-seg" style="flex-grow:@Grow(share.Value, shareBase); background:@share.Color" title="@share.Name: @share.Value.ToString("C")"></span>
+                    <span class="wealth-seg" style="flex-grow:@Grow(share.Value, shareBase); background:@share.Color" title="@share.Name: @Money(share.Value)"></span>
                 }
             </div>
         </section>
+
+        @if (currencyInfo != null && (currencyInfo.ExcludedCompanies > 0 || currencyInfo.BaseCountryMissing))
+        {
+            <div class="alert alert-info mt-3" role="status">
+                <i class="bi bi-info-circle-fill me-2" aria-hidden="true"></i>
+                @if (currencyInfo.BaseCountryMissing)
+                {
+                    <span>El país base guardado ya no existe en el catálogo: los totales se muestran en EUR. </span>
+                }
+                @if (currencyInfo.ExcludedCompanies > 0)
+                {
+                    <span>@currencyInfo.ExcludedCompanies @(currencyInfo.ExcludedCompanies == 1 ? "empresa en otra divisa sin tipo de cambio no incluida" : "empresas en otra divisa sin tipo de cambio no incluidas") en las acciones. <a href="/settings">Configurar tipos de cambio</a></span>
+                }
+            </div>
+        }
 
         <div class="class-grid">
             @foreach (var share in shares)
             {
                 <div class="class-card" style="--swatch:@share.Color">
                     <p class="class-name">@share.Name</p>
-                    <p class="class-value">@share.Value.ToString("C")</p>
+                    <p class="class-value">@Money(share.Value)</p>
                     <p class="class-meta">@Pct(share.Value, shareBase) del patrimonio</p>
                     @if (share.Invested.HasValue)
                     {
-                        <p class="class-meta">Invertido: <span class="num">@share.Invested.Value.ToString("C")</span></p>
+                        <p class="class-meta">Invertido: <span class="num">@Money(share.Invested.Value)</span></p>
                     }
                     <p class="class-meta">@share.Detail</p>
                 </div>
@@ -104,9 +149,9 @@
                                         {
                                             <tr>
                                                 <td>@row.AssetClass</td>
-                                                <td class="text-end">@row.Invested.ToString("C")</td>
-                                                <td class="text-end">@row.CurrentValue.ToString("C")</td>
-                                                <td class="text-end @GetResultClass(row.Return)">@row.Return.ToString("C")</td>
+                                                <td class="text-end">@Money(row.Invested)</td>
+                                                <td class="text-end">@Money(row.CurrentValue)</td>
+                                                <td class="text-end @GetResultClass(row.Return)">@Money(row.Return)</td>
                                                 <td class="text-end @GetResultClass(row.ReturnPercentage)">@Arrow(row.ReturnPercentage) @row.ReturnPercentage.ToString("N2")%</td>
                                             </tr>
                                         }
@@ -114,9 +159,9 @@
                                     <tfoot>
                                         <tr class="fw-bold">
                                             <td>Total</td>
-                                            <td class="text-end">@performance.TotalInvested.ToString("C")</td>
-                                            <td class="text-end">@performance.CurrentValue.ToString("C")</td>
-                                            <td class="text-end @GetResultClass(performance.TotalReturn)">@performance.TotalReturn.ToString("C")</td>
+                                            <td class="text-end">@Money(performance.TotalInvested)</td>
+                                            <td class="text-end">@Money(performance.CurrentValue)</td>
+                                            <td class="text-end @GetResultClass(performance.TotalReturn)">@Money(performance.TotalReturn)</td>
                                             <td class="text-end @GetResultClass(performance.ReturnPercentage)">@Arrow(performance.ReturnPercentage) @performance.ReturnPercentage.ToString("N2")%</td>
                                         </tr>
                                     </tfoot>
@@ -138,10 +183,10 @@
                         }
                         else
                         {
-                            <div class="d-flex justify-content-between"><span>Ingresos por alquiler</span><strong class="text-success">@cashFlow.TotalIncome.ToString("C")</strong></div>
-                            <div class="d-flex justify-content-between"><span>Gastos</span><strong class="text-danger">@cashFlow.TotalExpenses.ToString("C")</strong></div>
+                            <div class="d-flex justify-content-between"><span>Ingresos por alquiler</span><strong class="text-success">@Money(cashFlow.TotalIncome)</strong></div>
+                            <div class="d-flex justify-content-between"><span>Gastos</span><strong class="text-danger">@Money(cashFlow.TotalExpenses)</strong></div>
                             <hr />
-                            <div class="d-flex justify-content-between"><span>Flujo neto</span><strong class="@GetResultClass(cashFlow.NetCashFlow)">@cashFlow.NetCashFlow.ToString("C")</strong></div>
+                            <div class="d-flex justify-content-between"><span>Flujo neto</span><strong class="@GetResultClass(cashFlow.NetCashFlow)">@Money(cashFlow.NetCashFlow)</strong></div>
                         }
                     </div>
                 </div>
@@ -179,7 +224,7 @@
                                                 <td>@op.Category</td>
                                                 <td>@op.Type</td>
                                                 <td>@op.Description</td>
-                                                <td class="text-end">@op.Amount.ToString("C")</td>
+                                                <td class="text-end">@Money(op.Amount)</td>
                                             </tr>
                                         }
                                     </tbody>
@@ -215,9 +260,16 @@
                     Propiedades
                 </button>
             </div>
+            <div class="col-md-3 mb-2">
+                <button class="btn btn-outline-primary w-100" @onclick="NavigateToHistory">
+                    Histórico
+                </button>
+            </div>
         </div>
     }
 </div>
+
+<WealthCaptureModal @ref="captureModal" OnCaptured="OnCaptured" />
 
 @code {
     private DashboardSummary? summary;
@@ -225,7 +277,15 @@
     private IncomeExpenseStats? cashFlow;
     private List<RecentOperation> recentOperations = new();
     private List<DashboardAlert> alerts = new();
+    private DashboardCurrencyInfo? currencyInfo;
+    private WealthVariation? variation;
+    private WealthCaptureModal? captureModal;
+    private string? captureMessage;
     private bool isLoading = true;
+
+    /// <summary>Importe con el símbolo de la divisa base (SPEC-01-02)</summary>
+    private string Money(decimal amount) =>
+        CurrencyFormatter.Format(amount, currencyInfo?.CurrencyCode);
 
     protected override async Task OnInitializedAsync()
     {
@@ -237,11 +297,13 @@
         try
         {
             isLoading = true;
+            currencyInfo = await DashboardService.GetCurrencyInfoAsync();
             summary = await DashboardService.GetDashboardSummaryAsync();
             performance = await DashboardService.GetPortfolioPerformanceAsync();
             cashFlow = await DashboardService.GetIncomeExpenseStatsAsync();
             recentOperations = await DashboardService.GetRecentOperationsAsync(10);
             alerts = await DashboardService.GetDashboardAlertsAsync();
+            await LoadVariationAsync();
         }
         catch (Exception ex)
         {
@@ -250,6 +312,23 @@
         finally
         {
             isLoading = false;
+        }
+    }
+
+    /// <summary>Variación frente a la última captura de un mes anterior (SPEC-17-01). Si falla, no se muestra.</summary>
+    private async Task LoadVariationAsync()
+    {
+        try
+        {
+            variation = summary == null
+                ? null
+                : await WealthSnapshotService.GetDashboardVariationAsync(
+                    DateTime.Now, summary.TotalPatrimony, currencyInfo?.CurrencyCode ?? CurrencyFormatter.DefaultCurrency);
+        }
+        catch (Exception ex)
+        {
+            variation = null;
+            Logger.LogWarning(ex, "No se pudo calcular la variación frente a la última captura");
         }
     }
 
@@ -291,4 +370,19 @@
     private void NavigateToBank() => Navigation.NavigateTo("/banco");
     private void NavigateToRefugio() => Navigation.NavigateTo("/activos-refugio");
     private void NavigateToProperties() => Navigation.NavigateTo("/inmuebles");
+    private void NavigateToHistory() => Navigation.NavigateTo("/history");
+
+    private async Task OpenCapture()
+    {
+        if (captureModal != null)
+        {
+            await captureModal.ShowAsync();
+        }
+    }
+
+    private async Task OnCaptured(WealthSnapshot saved)
+    {
+        captureMessage = $"Captura de {saved.PeriodLabel} guardada.";
+        await LoadVariationAsync();
+    }
 }

@@ -1,0 +1,76 @@
+@* Ventana «Detalles» (SPEC-01-03): importes originales y convertidos con el tipo de cambio aplicado.
+   Los datos los prepara IExchangeRateService; aquí solo se muestran. *@
+
+@if (Details != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-currency-exchange me-2" aria-hidden="true"></i>
+                        Detalles
+                    </h5>
+                    <button type="button" class="btn-close" aria-label="Cerrar" @onclick="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="fw-bold mb-0">@Details.Title</p>
+                    @if (!string.IsNullOrEmpty(Details.Subtitle))
+                    {
+                        <p class="text-muted small">@Details.Subtitle</p>
+                    }
+
+                    <table class="table table-sm align-middle mt-3">
+                        <thead>
+                            <tr>
+                                <th>Concepto</th>
+                                <th class="text-end">@(Details.IsBaseCurrency ? $"Importe ({Details.OriginalCurrencyCode})" : $"Importe original ({Details.OriginalCurrencyCode})")</th>
+                                @if (Details.HasRate)
+                                {
+                                    <th class="text-end">Convertido (@Details.TargetCurrencyCode)</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var line in Details.Lines)
+                            {
+                                <tr>
+                                    <td>@line.Label</td>
+                                    <td class="text-end">@line.Original</td>
+                                    @if (Details.HasRate)
+                                    {
+                                        <td class="text-end">@line.Converted</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+
+                    @if (Details.HasRate)
+                    {
+                        <p class="mb-1"><strong>Tipo de cambio:</strong> @Details.RateText</p>
+                    }
+                    @if (!string.IsNullOrEmpty(Details.RateNote))
+                    {
+                        <p class="small @(Details.HasRate ? "text-muted" : "text-warning-emphasis") mb-0">@Details.RateNote</p>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="Close">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Datos que muestra la ventana; si es nulo, no se pinta</summary>
+    [Parameter]
+    public ExchangeDetails? Details { get; set; }
+
+    /// <summary>Se dispara al cerrar la ventana</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private Task Close() => OnClose.InvokeAsync();
+}

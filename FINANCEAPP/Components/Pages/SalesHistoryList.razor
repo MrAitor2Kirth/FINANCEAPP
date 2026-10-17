@@ -1,6 +1,10 @@
 ﻿@page "/sales-history"
 @using FINANCEAPP.Models
 @inject ISaleHistoryService SaleHistoryService
+@inject IOperationService OperationService
+@inject ICompanyService CompanyService
+@inject ICountryService CountryService
+@inject IExchangeRateService ExchangeRateService
 
 <PageTitle>Histórico de ventas</PageTitle>
 
@@ -16,10 +20,20 @@
                     <p class="lead text-muted">Beneficio generado por cada venta de acciones</p>
                 </div>
                 <div>
-                    <a href="/operations" class="btn btn-outline-secondary btn-lg">
-                        <i class="bi bi-arrow-left me-2"></i>
-                        Volver a operaciones
-                    </a>
+                    @if (string.Equals(From, "operations", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <a href="/operations" class="btn btn-outline-secondary btn-lg">
+                            <i class="bi bi-arrow-left me-2"></i>
+                            Volver a operaciones
+                        </a>
+                    }
+                    else
+                    {
+                        <a href="/history" class="btn btn-outline-secondary btn-lg">
+                            <i class="bi bi-arrow-left me-2"></i>
+                            Volver al histórico
+                        </a>
+                    }
                 </div>
             </div>
         </div>
@@ -61,16 +75,24 @@
             </div>
             <div class="stat-card" style="--swatch:var(--teal)">
                 <p class="stat-label">Importe vendido</p>
-                <p class="stat-value">@totalAmount.ToString("C2")</p>
+                <p class="stat-value">@CurrencyFormatter.Format(totalAmount, baseCurrency.CurrencyCode)</p>
+                @if (excludedSalesCount > 0)
+                {
+                    <p class="stat-note small text-muted mb-0">@excludedSalesCount @(excludedSalesCount == 1 ? "venta en otra divisa no incluida" : "ventas en otra divisa no incluidas") hasta que exista el tipo de cambio</p>
+                }
+                @if (totals.ConvertedSales > 0)
+                {
+                    <p class="stat-note small text-muted mb-0">Incluye @totals.ConvertedSales @(totals.ConvertedSales == 1 ? "venta convertida" : "ventas convertidas") a @baseCurrency.CurrencyCode con el tipo actual</p>
+                }
             </div>
             <div class="stat-card" style="--swatch:var(--ink-soft)">
                 <p class="stat-label">Comisiones</p>
-                <p class="stat-value">@totalCommission.ToString("C2")</p>
+                <p class="stat-value">@CurrencyFormatter.Format(totalCommission, baseCurrency.CurrencyCode)</p>
             </div>
             <div class="stat-card" style="--swatch:@(totalProfit >= 0 ? "var(--gain)" : "var(--loss)")">
                 <p class="stat-label">Beneficio total</p>
                 <p class="stat-value" style="color:@(totalProfit >= 0 ? "var(--gain)" : "var(--loss)")">
-                    @(totalProfit >= 0 ? "▲" : "▼") @totalProfit.ToString("C2")
+                    @(totalProfit >= 0 ? "▲" : "▼") @CurrencyFormatter.Format(totalProfit, baseCurrency.CurrencyCode)
                 </p>
             </div>
         </div>
@@ -111,7 +133,7 @@
                                             <input type="number"
                                                    class="form-control form-control-sm text-end"
                                                    @bind="editSellPrice"
-                                                   @bind:event="oninput"
+                                                   @bind:after="RoundSellPrice"
                                                    step="0.01"
                                                    min="0"
                                                    inputmode="decimal"
@@ -122,10 +144,10 @@
                                             @record.SellPrice.ToString("N2")
                                         }
                                     </td>
-                                    <td class="text-end align-middle">@record.Amount.ToString("C2")</td>
-                                    <td class="text-end align-middle">@record.Commission.ToString("C2")</td>
+                                    <td class="text-end align-middle">@CurrencyFormatter.Format(record.Amount, CurrencyOf(record))</td>
+                                    <td class="text-end align-middle">@CurrencyFormatter.Format(record.Commission, CurrencyOf(record))</td>
                                     <td class="text-end align-middle fw-bold" style="color:@(record.Profit >= 0 ? "var(--gain)" : "var(--loss)")">
-                                        @(record.Profit >= 0 ? "▲" : "▼") @record.Profit.ToString("C2")
+                                        @(record.Profit >= 0 ? "▲" : "▼") @CurrencyFormatter.Format(record.Profit, CurrencyOf(record))
                                     </td>
                                     <td class="text-center align-middle">
                                         <div class="btn-group-sm d-flex gap-1 justify-content-center" role="group">
@@ -143,9 +165,15 @@
                                                 <button type="button" class="btn btn-warning btn-sm" @onclick="() => StartEdit(record)" disabled="@(editingId.HasValue)" title="Editar precio de venta">
                                                     <i class="bi bi-pencil-fill"></i>
                                                 </button>
-                                                <button type="button" class="btn btn-danger btn-sm" @onclick="() => ConfirmDelete(record)" disabled="@(editingId.HasValue)" title="Eliminar">
-                                                    <i class="bi bi-trash-fill"></i>
+                                                <button type="button" class="btn btn-danger btn-sm" @onclick="() => ConfirmDelete(record)" disabled="@(editingId.HasValue)" title="Deshacer venta">
+                                                    <i class="bi bi-arrow-counterclockwise"></i>
                                                 </button>
+                                                @if (!string.Equals(CurrencyOf(record), baseCurrency.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                                                {
+                                                    <button type="button" class="btn btn-info btn-sm" @onclick="() => ShowDetails(record)" title="Detalles del tipo de cambio">
+                                                        <i class="bi bi-currency-exchange"></i>
+                                                    </button>
+                                                }
                                             }
                                         </div>
                                     </td>
@@ -165,7 +193,9 @@
     }
 </div>
 
-<!-- Modal de confirmación de eliminación -->
+<ExchangeDetailsModal Details="exchangeDetails" OnClose="CloseDetails" />
+
+<!-- Modal de confirmación de deshacer venta -->
 <div class="modal fade @(showDeleteModal ? "show d-block" : "")"
      tabindex="-1"
      style="@(showDeleteModal ? "background-color: rgba(0,0,0,0.5);" : "")">
@@ -174,23 +204,24 @@
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title">
                     <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                    Confirmar eliminación
+                    Confirmar deshacer venta
                 </h5>
                 <button type="button" class="btn-close btn-close-white" @onclick="CancelDelete"></button>
             </div>
             <div class="modal-body">
                 @if (recordToDelete != null)
                 {
-                    <p class="mb-2">¿Está seguro que desea eliminar este registro del histórico?</p>
+                    <p class="mb-2">¿Está seguro que desea deshacer esta venta?</p>
                     <div class="alert alert-warning">
                         <strong>Empresa:</strong> @recordToDelete.CompanyName<br />
                         <strong>Fecha:</strong> @recordToDelete.SaleDate.ToString("dd/MM/yyyy")<br />
                         <strong>Acciones:</strong> @recordToDelete.NumberOfShares.ToString("N0")<br />
-                        <strong>Beneficio:</strong> @recordToDelete.Profit.ToString("C2")
+                        <strong>Beneficio:</strong> @CurrencyFormatter.Format(recordToDelete.Profit, CurrencyOf(recordToDelete))
                     </div>
                     <div class="alert alert-info">
                         <i class="bi bi-info-circle me-1"></i>
-                        Las compras que se cerraron con esta venta <strong>no se reabrirán</strong>.
+                        Las compras que se cerraron con esta venta <strong>se reabrirán</strong> (las filas partidas se unirán de nuevo)
+                        y se eliminarán la operación de venta y este registro del histórico.
                     </div>
                     <p class="text-danger mb-0">
                         <i class="bi bi-exclamation-circle me-1"></i>
@@ -204,12 +235,12 @@
                     @if (isDeleting)
                     {
                         <span class="spinner-border spinner-border-sm me-2"></span>
-                        <span>Eliminando...</span>
+                        <span>Deshaciendo...</span>
                     }
                     else
                     {
-                        <i class="bi bi-trash-fill me-2"></i>
-                        <span>Eliminar</span>
+                        <i class="bi bi-arrow-counterclockwise me-2"></i>
+                        <span>Deshacer venta</span>
                     }
                 </button>
             </div>
@@ -218,6 +249,10 @@
 </div>
 
 @code {
+    /// <summary>Página de origen (SPEC-17-01): «operations» vuelve a /operations; si no, a /history</summary>
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? From { get; set; }
+
     private List<SaleHistory> records = new();
 
     private bool isLoading = true;
@@ -233,9 +268,36 @@
     // Eliminación
     private SaleHistory? recordToDelete;
 
-    private decimal totalAmount => records.Sum(r => r.Amount);
-    private decimal totalCommission => records.Sum(r => r.Commission);
-    private decimal totalProfit => records.Sum(r => r.Profit);
+    // Divisa de cada venta = la de su empresa, buscada por nombre (EUR si la empresa ya no existe)
+    private Dictionary<string, string> companyCurrencies = new();
+    private BaseCurrencyInfo baseCurrency = new();
+
+    // Ventana «Detalles» (SPEC-01-03)
+    private ExchangeDetails? exchangeDetails;
+
+    private async Task ShowDetails(SaleHistory record)
+    {
+        exchangeDetails = await ExchangeRateService.GetSaleDetailsAsync(record);
+    }
+
+    private void CloseDetails() => exchangeDetails = null;
+
+    private string CurrencyOf(SaleHistory record) =>
+        companyCurrencies.TryGetValue(record.CompanyName, out var currency)
+            ? currency
+            : CurrencyFormatter.DefaultCurrency;
+
+    // Las tarjetas suman todas las ventas en la divisa base: las de otra divisa se convierten con el
+    // tipo actual de Configuración (antes se dejaban fuera aunque hubiera tipo y el total no cuadraba)
+    private ConvertedSaleTotals totals = new();
+    private int excludedSalesCount => totals.MissingRateSales;
+
+    private decimal totalAmount => totals.Amount;
+    private decimal totalCommission => totals.Commission;
+    private decimal totalProfit => totals.Profit;
+
+    // El precio de venta se guarda con 2 decimales
+    private void RoundSellPrice() => editSellPrice = Math.Round(editSellPrice, 2);
 
     protected override async Task OnInitializedAsync()
     {
@@ -248,6 +310,12 @@
         {
             isLoading = true;
             records = await SaleHistoryService.GetAllAsync();
+            var companies = await CompanyService.GetAllAsync();
+            companyCurrencies = companies
+                .GroupBy(c => c.Name)
+                .ToDictionary(g => g.Key, g => g.First().CurrencyCode);
+            baseCurrency = await CountryService.GetBaseCurrencyAsync();
+            totals = await ExchangeRateService.GetConvertedSaleTotalsAsync(records, companyCurrencies);
         }
         catch (Exception ex)
         {
@@ -335,14 +403,20 @@
         try
         {
             isDeleting = true;
-            var success = await SaleHistoryService.DeleteAsync(recordToDelete.Id);
-            if (success)
+            var result = await OperationService.UndoSaleAsync(recordToDelete.Id);
+            if (result.Success)
             {
+                if (result.ReopenedCount == 0)
+                {
+                    errorMessage = "La venta se ha eliminado, pero no tenía compras vinculadas: no se ha reabierto ninguna.";
+                }
+
                 await LoadRecords();
             }
             else
             {
-                errorMessage = "El registro ya no existe.";
+                errorMessage = result.ErrorMessage;
+                await LoadRecords();
             }
 
             showDeleteModal = false;
@@ -350,8 +424,8 @@
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error al eliminar el registro: {ex.Message}");
-            errorMessage = "No se pudo eliminar el registro.";
+            Console.WriteLine($"Error al deshacer la venta: {ex.Message}");
+            errorMessage = "No se pudo deshacer la venta. No se ha modificado ningún dato.";
             showDeleteModal = false;
         }
         finally

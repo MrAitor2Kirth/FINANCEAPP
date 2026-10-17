@@ -3,6 +3,8 @@
 @using FINANCEAPP.Models
 @inject IOperationService OperationService
 @inject ICompanyService CompanyService
+@inject ICountryService CountryService
+@inject IExchangeRateService ExchangeRateService
 
 <PageTitle>Operaciones Financieras</PageTitle>
 
@@ -18,7 +20,7 @@
                     <p class="lead text-muted">Gestión inline de operaciones de inversión</p>
                 </div>
                 <div class="d-flex gap-2">
-                    <a href="/sales-history" class="btn btn-outline-primary btn-lg">
+                    <a href="/sales-history?from=operations" class="btn btn-outline-primary btn-lg">
                         <i class="bi bi-clock-history me-2"></i>
                         Histórico de ventas
                     </a>
@@ -38,6 +40,13 @@
                 <i class="bi bi-exclamation-triangle-fill me-2"></i>@errorMessage
             </div>
             <button type="button" class="btn-close" aria-label="Cerrar" @onclick="ClearError"></button>
+        </div>
+    }
+
+    @if (editingOperationId.HasValue && !string.IsNullOrEmpty(editWarning))
+    {
+        <div class="alert alert-warning d-flex align-items-center" role="alert">
+            <i class="bi bi-link-45deg me-2"></i>@editWarning
         </div>
     }
 
@@ -77,7 +86,11 @@
             </div>
             <div class="stat-card" style="--swatch:var(--amber)">
                 <p class="stat-label">Total invertido</p>
-                <p class="stat-value">@totalAmount.ToString("C2")</p>
+                <p class="stat-value">@CurrencyFormatter.Format(totalAmount, baseCurrency.CurrencyCode)</p>
+                @if (excludedOperationsCount > 0)
+                {
+                    <p class="stat-note small text-muted mb-0">@excludedOperationsCount @(excludedOperationsCount == 1 ? "operación en otra divisa no incluida" : "operaciones en otra divisa no incluidas") hasta que exista el tipo de cambio</p>
+                }
             </div>
         </div>
 
@@ -141,6 +154,7 @@
                                 <th scope="col" style="width: 110px;" class="text-end">Nº Acciones</th>
                                 <th scope="col" style="width: 110px;" class="text-end">Comisiones</th>
                                 <th scope="col" style="width: 130px;" class="text-end">Importe Total</th>
+                                <th scope="col" style="width: 110px;" class="text-center">Cód. divisa</th>
                                 <th scope="col" style="width: 100px;" class="text-center">Estado</th>
                                 <th scope="col" style="width: 140px;" class="text-center">Acciones</th>
                             </tr>
@@ -163,6 +177,7 @@
                                                     <option value="@company.Name">@company.Name</option>
                                                 }
                                             </select>
+                                            <a href="/companies/new" class="small d-block mt-1">¿No está? Añadir desde el catálogo</a>
                                             @if (isRefreshingSelectedCompanyLivePrice)
                                             {
                                                 <small class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Actualizando precio en vivo...</small>
@@ -188,9 +203,7 @@
                                             <input type="number"
                                                    class="form-control form-control-sm text-end"
                                                    @bind="editPricePerShare"
-                                                   @bind:event="oninput"
-                                                   @bind:after="RecalculateAmount"
-                                                   @onchange="OnPricePerShareChanged"
+                                                   @bind:after="OnPricePerShareCommitted"
                                                    step="0.01"
                                                    min="0"
                                                    inputmode="decimal"
@@ -204,8 +217,7 @@
                                             <input type="number"
                                                    class="form-control form-control-sm text-end"
                                                    @bind="editLivePrice"
-                                                   @bind:event="oninput"
-                                                   @bind:after="RecalculateAmount"
+                                                   @bind:after="OnLivePriceCommitted"
                                                    step="0.01"
                                                    min="0"
                                                    inputmode="decimal"
@@ -224,8 +236,7 @@
                                             <input type="number"
                                                    class="form-control form-control-sm text-end"
                                                    @bind="editCommission"
-                                                   @bind:event="oninput"
-                                                   @bind:after="RecalculateAmount"
+                                                   @bind:after="OnCommissionCommitted"
                                                    step="0.01"
                                                    min="0"
                                                    inputmode="decimal"
@@ -235,7 +246,7 @@
                                             <input type="number"
                                                    class="form-control form-control-sm text-end fw-bold text-primary"
                                                    @bind="editCalculatedAmount"
-                                                   @bind:event="oninput"
+                                                   @bind:after="OnAmountCommitted"
                                                    step="0.01"
                                                    min="0"
                                                    inputmode="decimal"
@@ -247,14 +258,29 @@
                                             }
                                         </td>
                                         <td class="text-center align-middle">
-                                            @if (editOperation.CloseDate.HasValue)
+                                            <span class="badge bg-light text-dark border" title="La divisa es la de la empresa y no se puede editar">@CurrencyFormatter.Label(GetEditCurrency())</span>
+                                            @if (!IsEditCurrencyBase())
                                             {
-                                                <span class="badge bg-secondary">Cerrada</span>
+                                                <input type="number"
+                                                       class="form-control form-control-sm text-end mt-1"
+                                                       @bind="editExchangeRate"
+                                                       step="0.000001"
+                                                       min="0"
+                                                       inputmode="decimal"
+                                                       title="Tipo de cambio a @baseCurrency.CurrencyCode: se precarga con el actual y puedes cambiarlo o dejarlo vacío"
+                                                       aria-label="Tipo de cambio"
+                                                       placeholder="Tipo @(baseCurrency.CurrencyCode)" />
                                             }
-                                            else
-                                            {
-                                                <span class="badge bg-success">Abierta</span>
-                                            }
+                                        </td>
+                                        <td class="text-center align-middle">
+                                            @* El estado es la fecha de cierre: Cerrada pone hoy (editable), Abierta la borra *@
+                                            <select class="form-select form-select-sm"
+                                                    value="@(editOperationCloseDate.HasValue ? "Cerrada" : "Abierta")"
+                                                    @onchange="OnEditStatusChanged"
+                                                    aria-label="Estado">
+                                                <option value="Abierta">Abierta</option>
+                                                <option value="Cerrada">Cerrada</option>
+                                            </select>
                                         </td>
                                         <td class="text-center align-middle">
                                             <div class="btn-group-sm d-flex gap-1" role="group">
@@ -309,7 +335,7 @@
                                             @{ var livePrice = GetLivePrice(operation.CompanyName); }
                                             @if (livePrice.HasValue)
                                             {
-                                                <span class="text-info">@livePrice.Value.ToString("C2")</span>
+                                                <span class="text-info">@CurrencyFormatter.Format(livePrice.Value, operation.EffectiveCurrencyCode)</span>
                                             }
                                             else
                                             {
@@ -317,9 +343,12 @@
                                             }
                                         </td>
                                         <td class="text-end align-middle">@operation.NumberOfShares.ToString("N4")</td>
-                                        <td class="text-end align-middle">@operation.Commission.ToString("C2")</td>
+                                        <td class="text-end align-middle">@CurrencyFormatter.Format(operation.Commission, operation.EffectiveCurrencyCode)</td>
                                         <td class="text-end align-middle">
-                                            <strong class="text-primary">@operation.Amount.ToString("C2")</strong>
+                                            <strong class="text-primary">@CurrencyFormatter.Format(operation.Amount, operation.EffectiveCurrencyCode)</strong>
+                                        </td>
+                                        <td class="text-center align-middle">
+                                            <span class="badge bg-light text-dark border">@CurrencyFormatter.Label(operation.EffectiveCurrencyCode)</span>
                                         </td>
                                         <td class="text-center align-middle">
                                             @if (operation.IsClosed)
@@ -339,17 +368,23 @@
                                             <div class="btn-group-sm d-flex gap-1" role="group">
                                                 <button type="button" 
                                                         class="btn btn-warning btn-sm" 
-                                                        @onclick="() => StartEdit(operation)"
+                                                        @onclick="() => TryStartEdit(operation)"
                                                         disabled="@(editingOperationId.HasValue)"
                                                         title="Editar">
                                                     <i class="bi bi-pencil-fill"></i>
                                                 </button>
                                                 <button type="button" 
                                                         class="btn btn-danger btn-sm" 
-                                                        @onclick="() => ConfirmDelete(operation)"
+                                                        @onclick="() => TryConfirmDelete(operation)"
                                                         disabled="@(editingOperationId.HasValue)"
                                                         title="Eliminar">
                                                     <i class="bi bi-trash-fill"></i>
+                                                </button>
+                                                <button type="button"
+                                                        class="btn btn-info btn-sm"
+                                                        @onclick="() => ShowDetails(operation)"
+                                                        title="Detalles">
+                                                    <i class="bi bi-currency-exchange"></i>
                                                 </button>
                                             </div>
                                         </td>
@@ -398,16 +433,9 @@
                     <div class="alert alert-warning">
                         <strong>Empresa:</strong> @operationToDelete.CompanyName<br/>
                         <strong>Tipo:</strong> @operationToDelete.Type<br/>
-                        <strong>Importe:</strong> @operationToDelete.Amount.ToString("C2")<br/>
+                        <strong>Importe:</strong> @CurrencyFormatter.Format(operationToDelete.Amount, operationToDelete.EffectiveCurrencyCode)<br/>
                         <strong>Fecha:</strong> @operationToDelete.Date.ToString("dd/MM/yyyy")
                     </div>
-                    @if (operationToDelete.Type == "Venta")
-                    {
-                        <div class="alert alert-info">
-                            <i class="bi bi-info-circle me-1"></i>
-                            Las compras que se cerraron con esta venta <strong>no se reabrirán</strong> y el registro del histórico de ventas se conserva.
-                        </div>
-                    }
                     <p class="text-danger mb-0">
                         <i class="bi bi-exclamation-circle me-1"></i>
                         <strong>Esta acción no se puede deshacer.</strong>
@@ -440,6 +468,8 @@
         </div>
     </div>
 </div>
+
+<ExchangeDetailsModal Details="exchangeDetails" OnClose="CloseDetails" />
 
 @code {
     // Lista de operaciones
@@ -477,6 +507,7 @@
 
     // Mensaje de error visible en pantalla
     private string? errorMessage;
+    private string? editWarning;
 
     // Métricas calculadas
     private List<Operation> filteredOperations =>
@@ -486,7 +517,56 @@
 
     private int openOperationsCount => filteredOperations.Count(o => !o.IsClosed);
     private int closedOperationsCount => filteredOperations.Count(o => o.IsClosed);
-    private decimal totalAmount => filteredOperations.Sum(o => o.Amount);
+    // Total solo con operaciones de la divisa base (SPEC-01-02); el resto se cuenta aparte
+    private BaseCurrencyInfo baseCurrency = new();
+    private IEnumerable<Operation> baseCurrencyOperations => filteredOperations.Where(o =>
+        string.Equals(o.EffectiveCurrencyCode, baseCurrency.CurrencyCode, StringComparison.OrdinalIgnoreCase));
+    private decimal totalAmount => baseCurrencyOperations.Sum(o => o.Amount);
+    private int excludedOperationsCount => filteredOperations.Count() - baseCurrencyOperations.Count();
+
+    /// <summary>
+    /// Precarga en la fila en edición el tipo de cambio actual de la divisa de la empresa (si hay y no es la base)
+    /// </summary>
+    private async Task PreloadExchangeRateAsync(string companyName)
+    {
+        var company = companies.FirstOrDefault(c => c.Name == companyName);
+        if (company == null)
+        {
+            return;
+        }
+
+        var current = await ExchangeRateService.GetCurrentRateAsync(company.CurrencyCode);
+        // Si el usuario cambió de empresa mientras tanto, no se pisa su fila
+        if (current != null && editOperation.CompanyName == companyName && !editExchangeRate.HasValue)
+        {
+            editExchangeRate = current.Rate;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// Divisa que mostrará la fila en edición: la de la empresa elegida (solo lectura)
+    /// </summary>
+    private string GetEditCurrency() =>
+        companies.FirstOrDefault(c => c.Name == editOperation.CompanyName)?.CurrencyCode
+        ?? CurrencyFormatter.DefaultCurrency;
+
+    // Tipo de cambio de la fila en edición y ventana «Detalles» (SPEC-01-03)
+    private decimal? editExchangeRate;
+    private ExchangeDetails? exchangeDetails;
+
+    private bool IsEditCurrencyBase() =>
+        string.Equals(CurrencyFormatter.Normalize(GetEditCurrency()), baseCurrency.CurrencyCode, StringComparison.OrdinalIgnoreCase);
+
+    private bool IsBaseOperation(Operation operation) =>
+        string.Equals(operation.EffectiveCurrencyCode, baseCurrency.CurrencyCode, StringComparison.OrdinalIgnoreCase);
+
+    private async Task ShowDetails(Operation operation)
+    {
+        exchangeDetails = await ExchangeRateService.GetOperationDetailsAsync(operation);
+    }
+
+    private void CloseDetails() => exchangeDetails = null;
 
     protected override async Task OnInitializedAsync()
     {
@@ -500,6 +580,7 @@
             isLoading = true;
             operations = await OperationService.GetAllAsync();
             companies = await CompanyService.GetAllAsync();
+            baseCurrency = await CountryService.GetBaseCurrencyAsync();
         }
         catch (Exception ex)
         {
@@ -533,10 +614,54 @@
     }
 
     /// <summary>
+    /// Edita una operación salvo que esté cerrada por una venta (en ese caso avisa de ir al histórico)
+    /// </summary>
+    private async Task TryStartEdit(Operation operation)
+    {
+        // Las operaciones ligadas a una venta del histórico se editan con aviso
+        var warning = await OperationService.GetSaleEditWarningAsync(operation.Id);
+        StartEdit(operation);
+        editWarning = warning;
+    }
+
+    /// <summary>
+    /// Pide confirmación para eliminar salvo que la operación esté cerrada por una venta
+    /// </summary>
+    private async Task TryConfirmDelete(Operation operation)
+    {
+        var lockMessage = await OperationService.GetSaleLockMessageAsync(operation.Id);
+        if (lockMessage != null)
+        {
+            errorMessage = lockMessage;
+            return;
+        }
+
+        ConfirmDelete(operation);
+    }
+
+    /// <summary>
+    /// Cambia el estado en modo edición. El estado no se guarda aparte: es la fecha de cierre.
+    /// Cerrada pone la fecha de hoy si no había ninguna (se puede cambiar en «Fecha Cierre»); Abierta la borra.
+    /// </summary>
+    private void OnEditStatusChanged(ChangeEventArgs e)
+    {
+        var status = e.Value?.ToString();
+        if (status == "Cerrada")
+        {
+            editOperationCloseDate ??= DateTime.Today;
+        }
+        else
+        {
+            editOperationCloseDate = null;
+        }
+    }
+
+    /// <summary>
     /// Inicia el modo edición para una operación
     /// </summary>
     private void StartEdit(Operation operation)
     {
+        editWarning = null;
         errorMessage = null;
         editingOperationId = operation.Id;
         editOperation = new Operation
@@ -550,6 +675,13 @@
             CreatedAt = operation.CreatedAt
         };
 
+        // Tipo de cambio: se conserva el guardado; solo se precarga el actual si la operación no tiene (SPEC-01-03)
+        editExchangeRate = operation.ExchangeRate;
+        if (!editExchangeRate.HasValue && !string.IsNullOrWhiteSpace(operation.CompanyName))
+        {
+            _ = PreloadExchangeRateAsync(operation.CompanyName);
+        }
+
         editOperationDate = operation.Date;
         editOperationCloseDate = operation.CloseDate;
         editPricePerShare = operation.PricePerShare;
@@ -557,7 +689,7 @@
         editCommission = operation.Commission;
         editCalculatedAmount = operation.Amount;
         // El precio en vivo arranca con el de la empresa de la fila (si está cargado); el importe guardado no se recalcula
-        editLivePrice = companies.FirstOrDefault(c => c.Name == operation.CompanyName)?.LivePrice ?? 0m;
+        editLivePrice = Math.Round(companies.FirstOrDefault(c => c.Name == operation.CompanyName)?.LivePrice ?? 0m, 2);
     }
 
     /// <summary>
@@ -621,6 +753,10 @@
             editOperation.Date = editOperationDate;
             editOperation.CloseDate = editOperationCloseDate;
 
+            // Tipo de cambio: solo en empresas de otra divisa; el servicio lo valida y sella su destino
+            editOperation.ExchangeRate = IsEditCurrencyBase() ? null : editExchangeRate;
+            editOperation.ExchangeRateTo = null;
+
             if (operationId == 0)
             {
                 if (editOperation.Type == "Venta")
@@ -661,6 +797,10 @@
             // Salir del modo edición
             editingOperationId = null;
             editOperation = new();
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
         }
         catch (Exception ex)
         {
@@ -709,6 +849,12 @@
                 showDeleteModal = false;
                 operationToDelete = null;
             }
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+            showDeleteModal = false;
+            operationToDelete = null;
         }
         catch (Exception ex)
         {
@@ -771,23 +917,37 @@
         }
     }
 
-    private async Task OnPricePerShareChanged(ChangeEventArgs e)
+    // Los importes con decimales se enlazan al salir del campo (onchange): con oninput, Blazor borraba
+    // la coma o el punto mientras se escribía y no dejaba teclear decimales. Se guardan con 2 decimales.
+    private void OnLivePriceCommitted()
     {
-        var rawValue = e.Value?.ToString();
-        if (decimal.TryParse(rawValue, NumberStyles.Any, CultureInfo.InvariantCulture, out var price) ||
-            decimal.TryParse(rawValue, NumberStyles.Any, CultureInfo.CurrentCulture, out price))
-        {
-            editPricePerShare = Math.Round(price, 2);
-            RecalculateAmount();
+        editLivePrice = Math.Round(editLivePrice, 2);
+        RecalculateAmount();
+    }
 
-            // Actualizar precio actual de la empresa seleccionada
-            if (!string.IsNullOrWhiteSpace(editOperation.CompanyName))
-            {
-                await CompanyService.UpdateCurrentPriceAsync(editOperation.CompanyName, editPricePerShare);
-                // Reflejar en la lista local
-                var company = companies.FirstOrDefault(c => c.Name == editOperation.CompanyName);
-                if (company != null) company.CurrentPrice = editPricePerShare;
-            }
+    private void OnAmountCommitted()
+    {
+        editCalculatedAmount = Math.Round(editCalculatedAmount, 2);
+    }
+
+    private void OnCommissionCommitted()
+    {
+        editCommission = Math.Round(editCommission, 2);
+        RecalculateAmount();
+    }
+
+    private async Task OnPricePerShareCommitted()
+    {
+        editPricePerShare = Math.Round(editPricePerShare, 2);
+        RecalculateAmount();
+
+        // Actualizar precio actual de la empresa seleccionada
+        if (editPricePerShare > 0 && !string.IsNullOrWhiteSpace(editOperation.CompanyName))
+        {
+            await CompanyService.UpdateCurrentPriceAsync(editOperation.CompanyName, editPricePerShare);
+            // Reflejar en la lista local
+            var company = companies.FirstOrDefault(c => c.Name == editOperation.CompanyName);
+            if (company != null) company.CurrentPrice = editPricePerShare;
         }
     }
 
@@ -800,11 +960,16 @@
         // No se arrastra el precio en vivo de la empresa anterior
         editLivePrice = 0;
 
+        // El tipo de cambio de la empresa anterior tampoco: se precarga el actual de la nueva divisa
+        editExchangeRate = null;
+
         var company = companies.FirstOrDefault(c => c.Name == editOperation.CompanyName);
         if (company == null)
         {
             return;
         }
+
+        await PreloadExchangeRateAsync(company.Name);
 
         try
         {
@@ -821,7 +986,7 @@
 
                 if (refreshed.LivePrice.HasValue)
                 {
-                    editLivePrice = refreshed.LivePrice.Value;
+                    editLivePrice = Math.Round(refreshed.LivePrice.Value, 2);
                     RecalculateAmount();
                 }
             }

@@ -168,6 +168,128 @@ namespace FINANCEAPP.Services
             }
         }
 
+        public async Task<StockQuote?> GetQuoteAsync(string ticker)
+        {
+            if (string.IsNullOrWhiteSpace(ticker))
+            {
+                return null;
+            }
+
+            var normalizedTicker = ticker.Trim();
+            var quote = await GetQuoteFromChartEndpointAsync(normalizedTicker);
+
+            // Igual que el precio en vivo: si el ticker no lleva sufijo de bolsa, se prueban los habituales
+            if (quote == null && !normalizedTicker.Contains('.'))
+            {
+                foreach (var suffix in ExchangeSuffixFallbacks)
+                {
+                    quote = await GetQuoteFromChartEndpointAsync(normalizedTicker + suffix);
+                    if (quote != null)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            return quote;
+        }
+
+        private async Task<StockQuote?> GetQuoteFromChartEndpointAsync(string ticker)
+        {
+            var url = $"https://query1.finance.yahoo.com/v8/finance/chart/{Uri.EscapeDataString(ticker)}?interval=1d&range=1d";
+
+            try
+            {
+                using var response = await _httpClient.GetAsync(url);
+                var payload = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning(
+                        "Yahoo Finance respondió con estado {StatusCode} a la cotización de {Ticker}. Cuerpo: {Body}",
+                        response.StatusCode, ticker, Truncate(payload));
+                    return null;
+                }
+
+                using var doc = JsonDocument.Parse(payload);
+
+                if (!doc.RootElement.TryGetProperty("chart", out var chart) ||
+                    (chart.TryGetProperty("error", out var errorNode) && errorNode.ValueKind != JsonValueKind.Null) ||
+                    !chart.TryGetProperty("result", out var resultArray) ||
+                    resultArray.ValueKind != JsonValueKind.Array || resultArray.GetArrayLength() == 0 ||
+                    !resultArray[0].TryGetProperty("meta", out var meta))
+                {
+                    return null;
+                }
+
+                var price = ReadDecimal(meta, "regularMarketPrice");
+                if (!price.HasValue)
+                {
+                    return null;
+                }
+
+                var quote = new StockQuote
+                {
+                    Symbol = ReadString(meta, "symbol") ?? ticker,
+                    Price = price.Value,
+                    PreviousClose = ReadDecimal(meta, "chartPreviousClose") ?? ReadDecimal(meta, "previousClose"),
+                    DayHigh = ReadDecimal(meta, "regularMarketDayHigh"),
+                    DayLow = ReadDecimal(meta, "regularMarketDayLow"),
+                    PriceTime = ReadUnixTime(meta, "regularMarketTime")?.ToLocalTime(),
+                    Currency = ReadString(meta, "currency")
+                };
+
+                if (meta.TryGetProperty("currentTradingPeriod", out var period) &&
+                    period.ValueKind == JsonValueKind.Object &&
+                    period.TryGetProperty("regular", out var regular) &&
+                    regular.ValueKind == JsonValueKind.Object)
+                {
+                    quote.RegularSessionStartUtc = ReadUnixTime(regular, "start");
+                    quote.RegularSessionEndUtc = ReadUnixTime(regular, "end");
+                }
+
+                return quote;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al consultar la cotización de Yahoo Finance para el ticker {Ticker}", ticker);
+                return null;
+            }
+        }
+
+        private static decimal? ReadDecimal(JsonElement element, string property)
+        {
+            if (element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number &&
+                decimal.TryParse(value.GetRawText(), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var result))
+            {
+                return result;
+            }
+
+            return null;
+        }
+
+        private static string? ReadString(JsonElement element, string property)
+        {
+            return element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+
+        /// <summary>
+        /// Lee segundos unix y los devuelve como fecha UTC
+        /// </summary>
+        private static DateTime? ReadUnixTime(JsonElement element, string property)
+        {
+            if (element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number &&
+                value.TryGetInt64(out var seconds) && seconds > 0)
+            {
+                return DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime;
+            }
+
+            return null;
+        }
+
         public async Task<List<StockHistoryBar>> GetDailyHistoryAsync(string ticker, string range = "5y")
         {
             if (string.IsNullOrWhiteSpace(ticker))

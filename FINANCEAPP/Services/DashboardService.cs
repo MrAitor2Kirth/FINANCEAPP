@@ -14,6 +14,8 @@ namespace FINANCEAPP.Services
         private readonly ISafeHavenService _safeHavenService;
         private readonly IPropertyService _propertyService;
         private readonly ICompanyService _companyService;
+        private readonly ICountryService _countryService;
+        private readonly IExchangeRateService _exchangeRateService;
         private readonly ILogger<DashboardService> _logger;
 
         public DashboardService(
@@ -22,6 +24,8 @@ namespace FINANCEAPP.Services
             ISafeHavenService safeHavenService,
             IPropertyService propertyService,
             ICompanyService companyService,
+            ICountryService countryService,
+            IExchangeRateService exchangeRateService,
             ILogger<DashboardService> logger)
         {
             _fundService = fundService;
@@ -29,7 +33,31 @@ namespace FINANCEAPP.Services
             _safeHavenService = safeHavenService;
             _propertyService = propertyService;
             _companyService = companyService;
+            _countryService = countryService;
+            _exchangeRateService = exchangeRateService;
             _logger = logger;
+        }
+
+        /// <summary>
+        /// Empresas cuya divisa es la divisa base (SPEC-01-02), junto con cuántas quedan fuera
+        /// y la divisa base. Las partes de acciones del Dashboard solo suman estas empresas.
+        /// </summary>
+        private async Task<ConvertedCompanyTotals> GetCompanyTotalsAsync()
+        {
+            var all = await _companyService.GetAllAsync();
+            return await _exchangeRateService.GetConvertedTotalsAsync(all);
+        }
+
+        public async Task<DashboardCurrencyInfo> GetCurrencyInfoAsync()
+        {
+            var totals = await GetCompanyTotalsAsync();
+            var baseInfo = await _countryService.GetBaseCurrencyAsync();
+            return new DashboardCurrencyInfo
+            {
+                CurrencyCode = baseInfo.CurrencyCode,
+                ExcludedCompanies = totals.MissingRateCompanies,
+                BaseCountryMissing = baseInfo.IsFallback
+            };
         }
 
         public async Task<DashboardSummary> GetDashboardSummaryAsync()
@@ -37,8 +65,9 @@ namespace FINANCEAPP.Services
             try
             {
                 // Obtener totales de cada categoría
-                var companiesTotal = (await _companyService.GetAllAsync()).Sum(c => c.TotalInvestedValue);
-                var companiesInitialTotal = (await _companyService.GetAllAsync()).Sum(c => c.TotalInvestedInitial);
+                var companyTotals = await GetCompanyTotalsAsync();
+                var companiesTotal = companyTotals.CurrentValue;
+                var companiesInitialTotal = companyTotals.InvestedInitial;
                 var fundsTotal = await _fundService.GetTotalCurrentValueAsync();
                 var fundsInitialTotal = await _fundService.GetTotalInvestedAsync();
                 var bankTotal = await _bankService.GetTotalBalanceAsync();
@@ -46,8 +75,9 @@ namespace FINANCEAPP.Services
                 var safeHavenInitialTotal = await _safeHavenService.GetTotalInvestedAsync();
                 var safeHavenTotal = await _safeHavenService.GetTotalCurrentValueAsync();
                 // Inmuebles no vendidos: valor actual si está informado; si no, total invertido
-                var realEstateTotal = (await _propertyService.GetActivePropertiesAsync())
-                    .Sum(p => p.CurrentValue ?? p.TotalInvested);
+                var activeProperties = await _propertyService.GetActivePropertiesAsync();
+                var realEstateTotal = activeProperties.Sum(p => p.CurrentValue ?? p.TotalInvested);
+                var realEstateInvestedTotal = activeProperties.Sum(p => p.TotalInvested);
 
                 var summary = new DashboardSummary
                 {
@@ -59,13 +89,14 @@ namespace FINANCEAPP.Services
                     SafeHavenTotal = safeHavenTotal,
                     SafeHavenInitialTotal = safeHavenInitialTotal,
                     RealEstateTotal = realEstateTotal,
+                    RealEstateInvestedTotal = realEstateInvestedTotal,
                     TotalPatrimony = companiesTotal + fundsTotal + bankTotal + safeHavenTotal + realEstateTotal,
 
                     CompaniesCount = (await _companyService.GetAllAsync()).Count,
                     FundsCount = (await _fundService.GetAllFundsAsync()).Count,
                     BankAccountsCount = (await _bankService.GetAllBankAccountsAsync()).Count,
                     SafeHavenAssetsCount = (await _safeHavenService.GetAllAssetsAsync()).Count,
-                    PropertiesCount = (await _propertyService.GetActivePropertiesAsync()).Count,
+                    PropertiesCount = activeProperties.Count,
 
                     LastUpdate = DateTime.Now
                 };
@@ -101,8 +132,7 @@ namespace FINANCEAPP.Services
                 var result = new Dictionary<string, decimal>();
 
                 // Acciones
-                var companies = await _companyService.GetAllAsync();
-                result["Acciones"] = companies.Sum(c => c.TotalInvestedValue);
+                result["Acciones"] = (await GetCompanyTotalsAsync()).CurrentValue;
 
                 // Fondos
                 var funds = await _fundService.GetAllFundsAsync();
@@ -140,10 +170,10 @@ namespace FINANCEAPP.Services
                 var fundsTotalValue = funds.Sum(f => f.CurrentValue);
 
                 // Acciones
-                var companies = await _companyService.GetAllAsync();
-                var companiesTotalInvested = companies.Sum(c => c.TotalInvestedInitial);
-                // Valor actual de las acciones: precio en vivo (o precio actual) x acciones en cartera
-                var companiesTotalValue = companies.Sum(c => c.TotalInvestedValue);
+                var companyTotals = await GetCompanyTotalsAsync();
+                var companiesTotalInvested = companyTotals.InvestedInitial;
+                // Valor actual de las acciones: precio en vivo (o precio actual) x acciones en cartera, convertido a la divisa base
+                var companiesTotalValue = companyTotals.CurrentValue;
 
                 // Agregados
                 performance.TotalInvested = fundsTotalInvested + companiesTotalInvested;

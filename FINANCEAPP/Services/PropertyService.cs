@@ -111,6 +111,11 @@ namespace FINANCEAPP.Services
                 // No creamos una operación "Compra Inicial"
                 property.Status = property.Status ?? "Vacío";
 
+                // Una propiedad nueva no tiene operaciones: lo invertido es el precio de compra.
+                // Antes quedaba a 0 y el patrimonio no la sumaba si no tenía valor actual.
+                property.TotalInvested = property.PurchasePrice;
+                property.TotalIncome = 0m;
+
                 _context.Properties.Add(property);
                 await _context.SaveChangesAsync();
 
@@ -144,6 +149,9 @@ namespace FINANCEAPP.Services
                     }
                 }
 
+                var nameChanged = existingProperty.Name != property.Name;
+                var previousPurchasePrice = existingProperty.PurchasePrice;
+
                 existingProperty.Name = property.Name;
                 existingProperty.PropertyType = property.PropertyType;
                 existingProperty.Address = property.Address;
@@ -152,12 +160,23 @@ namespace FINANCEAPP.Services
                 existingProperty.CurrentValue = property.CurrentValue;
                 existingProperty.Status = property.Status;
                 existingProperty.MonthlyRent = property.MonthlyRent;
-                existingProperty.TotalInvested = property.TotalInvested;
-                existingProperty.TotalIncome = property.TotalIncome;
                 existingProperty.UpdatedAt = DateTime.Now;
+
+                // Los totales no se copian del formulario: se calculan (precio de compra + gastos; ingresos).
+                // Si cambia el nombre, las operaciones siguen con el nombre anterior (se enlazan por nombre),
+                // así que solo se ajusta la diferencia del precio de compra.
+                if (nameChanged)
+                {
+                    existingProperty.TotalInvested += property.PurchasePrice - previousPurchasePrice;
+                }
 
                 _context.Properties.Update(existingProperty);
                 await _context.SaveChangesAsync();
+
+                if (!nameChanged)
+                {
+                    await RecalculatePropertyTotalsAsync(existingProperty.Name);
+                }
 
                 _logger.LogInformation($"Propiedad '{existingProperty.Name}' actualizada exitosamente");
                 return existingProperty;
@@ -251,6 +270,19 @@ namespace FINANCEAPP.Services
                 // Eliminar todas las operaciones de la propiedad
                 var operations = await GetOperationsByPropertyNameAsync(property.Name);
                 _context.PropertyOperations.RemoveRange(operations);
+
+                // Eliminar los documentos adjuntos (SPEC-14-01) en el mismo guardado, sin cargar sus archivos
+                var documentIds = await _context.PropertyDocuments
+                    .Where(d => d.PropertyId == id)
+                    .Select(d => d.Id)
+                    .ToListAsync();
+                // Si un documento ya está cargado en el contexto (p. ej. se abrió el panel de documentos),
+                // se usa esa instancia: adjuntar otra con el mismo Id hacía fallar el borrado
+                var documentsToRemove = documentIds
+                    .Select(docId => _context.PropertyDocuments.Local.FirstOrDefault(d => d.Id == docId)
+                                     ?? new PropertyDocument { Id = docId })
+                    .ToList();
+                _context.PropertyDocuments.RemoveRange(documentsToRemove);
 
                 // Eliminar la propiedad
                 _context.Properties.Remove(property);
@@ -527,6 +559,11 @@ namespace FINANCEAPP.Services
                         _context.PropertyOperations.Remove(operation);
                         await _context.SaveChangesAsync();
 
+                        // Los documentos que apuntaban a este gasto quedan sin gasto enlazado (SPEC-14-01)
+                        await _context.PropertyDocuments
+                            .Where(d => d.PropertyOperationId == id)
+                            .ExecuteUpdateAsync(s => s.SetProperty(d => d.PropertyOperationId, (int?)null));
+
                         // Recalcular los totales de la propiedad
                         await RecalculatePropertyTotalsAsync(propertyName);
 
@@ -568,11 +605,13 @@ namespace FINANCEAPP.Services
         {
             try
             {
-                var expenses = await _context.PropertyOperations
+                // SQLite no traduce Math.Abs dentro de Sum: se leen los importes y se suman en memoria
+                var amounts = await _context.PropertyOperations
                     .Where(po => po.PropertyName == propertyName && po.Category == "Gasto")
-                    .SumAsync(po => Math.Abs(po.Amount));
+                    .Select(po => po.Amount)
+                    .ToListAsync();
 
-                return expenses;
+                return amounts.Sum(amount => Math.Abs(amount));
             }
             catch (Exception ex)
             {

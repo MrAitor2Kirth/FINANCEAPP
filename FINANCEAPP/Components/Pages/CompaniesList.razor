@@ -1,5 +1,7 @@
 @page "/companies"
 @inject ICompanyService CompanyService
+@inject ICountryService CountryService
+@inject IExchangeRateService ExchangeRateService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
@@ -75,25 +77,36 @@
                 <p class="stat-value">@averageDividendYield.ToString("N2")%</p>
             </div>
             <div class="stat-card" style="--swatch:var(--plum)">
-                <p class="stat-label">Precio promedio</p>
-                <p class="stat-value">@averagePrice.ToString("C2")</p>
+                <p class="stat-label">Total invertido</p>
+                <p class="stat-value">@CurrencyFormatter.Format(convertedTotals.InvestedInitial, convertedTotals.BaseCurrencyCode)</p>
+                @if (convertedTotals.MissingRateCompanies > 0)
+                {
+                    <p class="stat-note small text-muted mb-0">@convertedTotals.MissingRateCompanies @(convertedTotals.MissingRateCompanies == 1 ? "empresa en otra divisa sin tipo de cambio no incluida" : "empresas en otra divisa sin tipo de cambio no incluidas"). <a href="/settings">Configurar tipos</a></p>
+                }
             </div>
         </div>
 
         <!-- Tabla de empresas -->
         <div class="card shadow-sm">
-            <div class="card-header bg-primary text-white">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-table me-2"></i>Listado de Empresas</h5>
+                <button type="button"
+                        class="btn btn-sm btn-outline-light"
+                        @onclick="ToggleExtended"
+                        aria-pressed="@(isExtended ? "true" : "false")">
+                    <i class="bi @(isExtended ? "bi-arrows-collapse" : "bi-arrows-expand") me-1" aria-hidden="true"></i>
+                    @(isExtended ? "Lista extendida" : "Lista extendible")
+                </button>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-sm table-hover align-middle mb-0 companies-table">
+                    <table class="table table-sm table-hover align-middle mb-0 companies-table @(isExtended ? "" : "companies-table--compact")">
                         <thead class="table-light">
                             <tr>
                                 <th scope="col">Empresa</th>
                                 <th scope="col" class="text-end">Precio</th>
                                 <th scope="col" class="text-end">Inversión</th>
-                                <th scope="col" class="text-end">Dividendos</th>
+                                <th scope="col" class="text-end">@(isExtended ? "Dividendos" : "Nº acciones")</th>
                                 <th scope="col">Rentabilidad</th>
                                 <th scope="col" class="text-center">Acciones</th>
                             </tr>
@@ -103,74 +116,126 @@
                             {
                                 <tr>
                                     <td>
-                                        <strong>@company.Name</strong>
-                                        <div class="mt-1 d-flex flex-wrap gap-1">
-                                            <span class="badge bg-primary">@company.Ticker</span>
-                                            <span class="badge @GetSectorBadgeClass(company.Sector)">@company.Sector</span>
-                                        </div>
-                                    </td>
-                                    <td class="text-end">
-                                        <div class="cell-pair">
-                                            <span class="cell-label">Actual</span>
-                                            <strong>@company.CurrentPrice.ToString("C2")</strong>
-                                        </div>
-                                        <div class="cell-pair">
-                                            <span class="cell-label">En vivo</span>
-                                            @if (company.LivePrice.HasValue)
-                                            {
-                                                <strong class="text-info">@company.LivePrice.Value.ToString("C2")</strong>
-                                            }
-                                            else if (isRefreshingLivePrices)
-                                            {
-                                                <span class="spinner-border spinner-border-sm text-muted" role="status"></span>
-                                            }
-                                            else
-                                            {
-                                                <span class="text-muted">N/D</span>
-                                            }
-                                        </div>
-                                        @if (company.LivePrice.HasValue && company.LivePriceUpdatedAt.HasValue)
+                                        @if (isExtended)
                                         {
-                                            <small class="text-muted">@GetRelativeTime(company.LivePriceUpdatedAt.Value)</small>
+                                            <strong>@company.Name</strong>
+                                            <div class="mt-1 d-flex flex-wrap gap-1">
+                                                <span class="badge bg-primary">@company.Ticker</span>
+                                                <span class="badge @GetSectorBadgeClass(company.Sector)">@company.Sector</span>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="d-flex align-items-center gap-2">
+                                                <strong>@company.Name</strong>
+                                                <span class="badge bg-primary">@company.Ticker</span>
+                                                <span class="badge @GetSectorBadgeClass(company.Sector)">@company.Sector</span>
+                                            </div>
                                         }
                                     </td>
                                     <td class="text-end">
-                                        <div class="cell-pair">
-                                            <span class="cell-label">Inicial</span>
-                                            <span>@company.TotalInvestedInitial.ToString("C2")</span>
-                                        </div>
-                                        <div class="cell-pair">
-                                            <span class="cell-label">Valor</span>
-                                            <strong>@company.TotalInvestedValue.ToString("C2")</strong>
-                                        </div>
-                                        <div class="cell-pair">
-                                            <span class="cell-label">Nº acciones</span>
-                                            <span>@company.NumberOfShares</span>
-                                        </div>
+                                        @if (isExtended)
+                                        {
+                                            <div class="cell-pair">
+                                                <span class="cell-label">Medio compra</span>
+                                                <strong>@(company.AveragePurchasePrice.HasValue ? CurrencyFormatter.Format(company.AveragePurchasePrice.Value, company.CurrencyCode) : "–")</strong>
+                                            </div>
+                                            <div class="cell-pair">
+                                                <span class="cell-label">En vivo</span>
+                                                @if (company.LivePrice.HasValue)
+                                                {
+                                                    <strong class="text-info">@CurrencyFormatter.Format(company.LivePrice.Value, company.CurrencyCode)</strong>
+                                                }
+                                                else if (isRefreshingLivePrices)
+                                                {
+                                                    <span class="spinner-border spinner-border-sm text-muted" role="status"></span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">N/D</span>
+                                                }
+                                            </div>
+                                            @if (company.LivePrice.HasValue && company.LivePriceUpdatedAt.HasValue)
+                                            {
+                                                <small class="text-muted">@GetRelativeTime(company.LivePriceUpdatedAt.Value)</small>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <div title="@(company.LivePrice.HasValue && company.LivePriceUpdatedAt.HasValue ? GetRelativeTime(company.LivePriceUpdatedAt.Value) : null)">
+                                                @if (company.LivePrice.HasValue)
+                                                {
+                                                    <strong class="text-info">@CurrencyFormatter.Format(company.LivePrice.Value, company.CurrencyCode)</strong>
+                                                }
+                                                else if (isRefreshingLivePrices)
+                                                {
+                                                    <span class="spinner-border spinner-border-sm text-muted" role="status"></span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">N/D</span>
+                                                }
+                                            </div>
+                                        }
                                     </td>
                                     <td class="text-end">
-                                        <strong class="text-success">@company.TotalDividends.ToString("C2")</strong>
+                                        @if (isExtended)
+                                        {
+                                            <div class="cell-pair">
+                                                <span class="cell-label">Inicial</span>
+                                                <span>@CurrencyFormatter.Format(company.TotalInvestedInitial, company.CurrencyCode)</span>
+                                            </div>
+                                            <div class="cell-pair">
+                                                <span class="cell-label">Valor</span>
+                                                <strong>@CurrencyFormatter.Format(company.TotalInvestedValue, company.CurrencyCode)</strong>
+                                            </div>
+                                            <div class="cell-pair">
+                                                <span class="cell-label">Nº acciones</span>
+                                                <span>@company.NumberOfShares</span>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <strong>@CurrencyFormatter.Format(company.TotalInvestedValue, company.CurrencyCode)</strong>
+                                        }
                                     </td>
+                                    @if (isExtended)
+                                    {
+                                        <td class="text-end">
+                                            <strong class="text-success">@CurrencyFormatter.Format(company.TotalDividends, company.CurrencyCode)</strong>
+                                        </td>
+                                    }
+                                    else
+                                    {
+                                        <td class="text-end">@company.NumberOfShares</td>
+                                    }
                                     <td>
-                                        <div class="cell-pair">
-                                            <span class="cell-label">Precio</span>
+                                        @if (isExtended)
+                                        {
+                                            <div class="cell-pair">
+                                                <span class="cell-label">Precio</span>
+                                                <span class="badge @GetPerformanceBadgeClass(company.PlusvaliaReturnPercent)">@company.PlusvaliaReturnPercent.ToString("N2")%</span>
+                                            </div>
+                                            <div class="cell-pair mt-1">
+                                                <span class="cell-label">Con div.</span>
+                                                <span class="badge @GetPerformanceBadgeClass(company.DividendPlusvaliaReturnPercent)">@company.DividendPlusvaliaReturnPercent.ToString("N2")%</span>
+                                            </div>
+                                            <div class="cell-pair mt-1">
+                                                <span class="cell-label">Yield</span>
+                                                @if (company.DividendYield > 0)
+                                                {
+                                                    <span class="badge @GetDividendYieldBadgeClass(company.DividendYield)">@company.FormattedDividendYield</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">-</span>
+                                                }
+                                            </div>
+                                        }
+                                        else
+                                        {
                                             <span class="badge @GetPerformanceBadgeClass(company.PlusvaliaReturnPercent)">@company.PlusvaliaReturnPercent.ToString("N2")%</span>
-                                        </div>
-                                        <div class="cell-pair mt-1">
-                                            <span class="cell-label">Con div.</span>
-                                            <span class="badge @GetPerformanceBadgeClass(company.DividendPlusvaliaReturnPercent)">@company.DividendPlusvaliaReturnPercent.ToString("N2")%</span>
-                                        </div>
-                                        <div class="cell-pair mt-1">
-                                            <span class="cell-label">Yield</span>
-                                            @if (company.DividendYield > 0)
-                                            {
-                                                <span class="badge @GetDividendYieldBadgeClass(company.DividendYield)">@company.FormattedDividendYield</span>
-                                            }
-                                            else
-                                            {
-                                                <span class="text-muted">-</span>
-                                            }
-                                        </div>
+                                        }
                                     </td>
                                     <td class="text-center">
                                         <div class="btn-group" role="group">
@@ -195,6 +260,13 @@
                                                     title="Eliminar empresa"
                                                     aria-label="Eliminar empresa">
                                                 <i class="bi bi-trash-fill" aria-hidden="true"></i>
+                                            </button>
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-info"
+                                                    @onclick="() => ShowDetails(company)"
+                                                    title="Detalles"
+                                                    aria-label="Detalles">
+                                                <i class="bi bi-currency-exchange" aria-hidden="true"></i>
                                             </button>
                                             <button type="button"
                                                     class="btn btn-sm btn-outline-secondary"
@@ -297,7 +369,9 @@
     </div>
 </div>
 
-<CompanyChartModal @ref="chartModal" />
+<CompanyChartModal @ref="chartModal" OnClosed="OnChartClosed" />
+
+<ExchangeDetailsModal Details="exchangeDetails" OnClose="CloseDetails" />
 
 @code {
     // Lista de empresas obtenidas del servicio
@@ -318,10 +392,32 @@
     // Métricas calculadas
     private int uniqueSectorsCount => companies?.Select(c => c.Sector).Distinct().Count() ?? 0;
     private decimal averageDividendYield => companies?.Any() == true ? companies.Average(c => c.DividendYield) : 0;
-    private decimal averagePrice => companies?.Any() == true ? companies.Average(c => c.CurrentPrice) : 0;
+    // Totales convertidos a la divisa base con el tipo actual (SPEC-01-02 y SPEC-01-03);
+    // las empresas en otra divisa sin tipo quedan fuera y se cuentan aparte
+    private BaseCurrencyInfo baseCurrency = new();
+    private ConvertedCompanyTotals convertedTotals = new();
+
+    // Ventana «Detalles» (SPEC-01-03)
+    private ExchangeDetails? exchangeDetails;
+
+    private bool IsBaseCurrency(CompanyDetail company) =>
+        string.Equals(CurrencyFormatter.Normalize(company.CurrencyCode), baseCurrency.CurrencyCode, StringComparison.OrdinalIgnoreCase);
+
+    private async Task ShowDetails(CompanyDetail company)
+    {
+        exchangeDetails = await ExchangeRateService.GetCompanyDetailsAsync(company);
+    }
+
+    private void CloseDetails() => exchangeDetails = null;
 
     // Indicador de refresco de precios en vivo en segundo plano
     private bool isRefreshingLivePrices = false;
+
+    // Modo del listado: false = corto (una linea por empresa), true = extendido con todo el detalle.
+    // Solo vive mientras la pagina esta abierta y afecta a todas las filas a la vez.
+    private bool isExtended = false;
+
+    private void ToggleExtended() => isExtended = !isExtended;
 
     /// <summary>
     /// Método que se ejecuta cuando el componente se inicializa
@@ -380,6 +476,8 @@
             isLoading = true;
             // Obtener todas las empresas desde el servicio
             companies = await CompanyService.GetAllAsync();
+            baseCurrency = await CountryService.GetBaseCurrencyAsync();
+            convertedTotals = await ExchangeRateService.GetConvertedTotalsAsync(companies);
         }
         catch (Exception ex)
         {
@@ -428,6 +526,15 @@
         {
             await chartModal.ShowAsync(company);
         }
+    }
+
+    /// <summary>
+    /// Al cerrar el gráfico se recarga la lista: el gráfico guarda el precio en vivo en la empresa
+    /// y puede haber registrado compras o ventas (SPEC-05-01, RF-3 y RF-10)
+    /// </summary>
+    private async Task OnChartClosed(bool operated)
+    {
+        await LoadCompanies();
     }
 
     /// <summary>

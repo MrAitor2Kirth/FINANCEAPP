@@ -41,6 +41,26 @@ namespace FINANCEAPP.Services
         /// Obtiene alertas o informaciones importantes
         /// </summary>
         Task<List<DashboardAlert>> GetDashboardAlertsAsync();
+
+        /// <summary>
+        /// Divisa base de los totales y empresas excluidas por tener otra divisa (SPEC-01-02)
+        /// </summary>
+        Task<DashboardCurrencyInfo> GetCurrencyInfoAsync();
+    }
+
+    /// <summary>
+    /// Divisa en la que se muestran los totales del Dashboard
+    /// </summary>
+    public class DashboardCurrencyInfo
+    {
+        /// <summary>Divisa base (la del país base de Configuración)</summary>
+        public string CurrencyCode { get; set; } = CurrencyFormatter.DefaultCurrency;
+
+        /// <summary>Empresas en otra divisa que no se suman porque no tienen tipo de cambio actual (SPEC-01-03)</summary>
+        public int ExcludedCompanies { get; set; }
+
+        /// <summary>True si el país base guardado no existe en el catálogo y se usa EUR</summary>
+        public bool BaseCountryMissing { get; set; }
     }
 
     /// <summary>
@@ -57,6 +77,9 @@ namespace FINANCEAPP.Services
         public decimal SafeHavenTotal { get; set; }
         public decimal SafeHavenInitialTotal { get; set; }
         public decimal RealEstateTotal { get; set; }
+
+        /// <summary>Total invertido de los inmuebles no vendidos (SPEC-17-01, para las capturas del patrimonio)</summary>
+        public decimal RealEstateInvestedTotal { get; set; }
 
         public int CompaniesCount { get; set; }
         public int FundsCount { get; set; }

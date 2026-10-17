@@ -1,0 +1,101 @@
+@page "/history"
+@inject IWealthSnapshotService WealthSnapshotService
+
+<PageTitle>Histórico</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="page-head">
+        <div>
+            <h1 class="sw" style="--swatch:var(--indigo)">
+                <i class="bi bi-clock-history me-2" aria-hidden="true"></i> Histórico
+            </h1>
+            <p class="page-sub">Ventas, evolución del patrimonio e informes por año</p>
+        </div>
+        <button class="btn btn-primary" @onclick="OpenCapture">
+            <i class="bi bi-camera me-1" aria-hidden="true"></i> Capturar patrimonio
+        </button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success alert-dismissible" role="status">
+            <i class="bi bi-check-circle-fill me-2" aria-hidden="true"></i>@successMessage
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => successMessage = null"></button>
+        </div>
+    }
+
+    <div class="history-grid">
+        <a class="history-card" href="/sales-history?from=history" style="--swatch:var(--amber)">
+            <i class="bi bi-receipt history-card-icon" aria-hidden="true"></i>
+            <span class="history-card-title">Histórico de ventas</span>
+            <span class="history-card-text">Beneficio de cada venta de acciones y opción de deshacerla.</span>
+        </a>
+
+        <a class="history-card" href="/history/wealth" style="--swatch:var(--indigo)">
+            <i class="bi bi-graph-up-arrow history-card-icon" aria-hidden="true"></i>
+            <span class="history-card-title">Patrimonio</span>
+            <span class="history-card-text">Capturas mensuales, variaciones y gráfico de evolución.</span>
+            <span class="history-card-meta">
+                @if (isLoading)
+                {
+                    <span>Cargando…</span>
+                }
+                else if (latest == null)
+                {
+                    <span>Sin capturas</span>
+                }
+                else
+                {
+                    <span>Última: @latest.PeriodLabel · @latest.CapturedAt.ToString("dd/MM/yyyy")</span>
+                }
+            </span>
+        </a>
+
+        <div class="history-card is-disabled" style="--swatch:var(--ink-soft)" aria-disabled="true">
+            <i class="bi bi-file-earmark-text history-card-icon" aria-hidden="true"></i>
+            <span class="history-card-title">Informe fiscal</span>
+            <span class="history-card-text">Resumen anual para la declaración de la Renta.</span>
+            <span class="history-card-meta"><span class="badge bg-secondary">Próximamente</span></span>
+        </div>
+    </div>
+</div>
+
+<WealthCaptureModal @ref="captureModal" OnCaptured="OnCaptured" />
+
+@code {
+    private WealthCaptureModal? captureModal;
+    private WealthSnapshot? latest;
+    private bool isLoading = true;
+    private string? successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadLatestAsync();
+    }
+
+    private async Task LoadLatestAsync()
+    {
+        try
+        {
+            latest = await WealthSnapshotService.GetLatestAsync();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task OpenCapture()
+    {
+        if (captureModal != null)
+        {
+            await captureModal.ShowAsync();
+        }
+    }
+
+    private async Task OnCaptured(WealthSnapshot saved)
+    {
+        successMessage = $"Captura de {saved.PeriodLabel} guardada.";
+        await LoadLatestAsync();
+    }
+}
