@@ -21,17 +21,20 @@ namespace FINANCEAPP.Services
         private readonly ICountryService _countryService;
         private readonly IPriceHistoryService _priceHistoryService;
         private readonly ICurrencyHistoryService _currencyHistoryService;
+        private readonly IExchangeRateService _exchangeRateService;
 
         public PortfolioPeriodService(
             AppDbContext context,
             ICountryService countryService,
             IPriceHistoryService priceHistoryService,
-            ICurrencyHistoryService currencyHistoryService)
+            ICurrencyHistoryService currencyHistoryService,
+            IExchangeRateService exchangeRateService)
         {
             _context = context;
             _countryService = countryService;
             _priceHistoryService = priceHistoryService;
             _currencyHistoryService = currencyHistoryService;
+            _exchangeRateService = exchangeRateService;
         }
 
         public async Task<PeriodSummary> GetPurchasesSummaryAsync(SalesPeriodFilter filter)
@@ -219,12 +222,225 @@ namespace FINANCEAPP.Services
             return summary;
         }
 
+        public async Task<SoldSummary> GetSoldAsync(SalesPeriodFilter filter, PeriodSummaryView view, CancellationToken cancellationToken = default)
+        {
+            var result = new SoldSummary();
+            var isAll = filter.Mode == SalesPeriodMode.All;
+            var (from, toExclusive) = filter.GetRange();
+            if (!isAll && (from == null || toExclusive == null || from.Value > DateTime.Today))
+            {
+                return result;
+            }
+
+            // Fecha de corte de «Cartera al cierre»: la misma que GetClosingSummaryAsync
+            DateTime? cutoff = null;
+            if (!isAll && view == PeriodSummaryView.Closing)
+            {
+                cutoff = toExclusive!.Value.AddDays(-1).Date;
+                if (cutoff > DateTime.Today)
+                {
+                    cutoff = DateTime.Today;
+                }
+            }
+            var purchasesView = !isAll && view == PeriodSummaryView.Purchases;
+
+            var companies = await LoadCompaniesAsync();
+            var sales = await _context.SalesHistory.AsNoTracking().ToListAsync(cancellationToken);
+
+            // Ventas de empresas ya borradas: sin empresa no hay divisa ni fila (RF-2)
+            var deletedCompanySales = sales.Count(s => !companies.ContainsKey(s.CompanyName));
+            sales = sales.Where(s => companies.ContainsKey(s.CompanyName)).ToList();
+            if (cutoff.HasValue)
+            {
+                sales = sales.Where(s => s.SaleDate.Date <= cutoff.Value).ToList();
+            }
+
+            var currencyByCompany = companies.ToDictionary(kv => kv.Key, kv => kv.Value.CurrencyCode);
+            var converted = await _exchangeRateService.GetConvertedSalesAsync(sales, currencyByCompany);
+
+            int approximate = 0, missing = 0;
+            var anyForeign = false;
+            decimal cost = 0, proceeds = 0;
+            foreach (var sale in converted)
+            {
+                if (sale.MissingRate)
+                {
+                    missing++;
+                    continue;
+                }
+
+                decimal saleCost, saleProceeds, saleCostOriginal, saleProceedsOriginal;
+                if (purchasesView)
+                {
+                    // Solo las compras del periodo que cerró esta venta, con su parte del cobrado (RF-5)
+                    var lots = sale.Lots.Where(l => l.Date >= from!.Value && l.Date < toExclusive!.Value).ToList();
+                    if (lots.Count == 0 || sale.Shares <= 0)
+                    {
+                        continue;
+                    }
+
+                    var share = lots.Sum(l => l.Shares) / sale.Shares;
+                    saleCost = lots.Sum(l => l.Cost);
+                    saleCostOriginal = lots.Sum(l => l.CostOriginal);
+                    saleProceeds = sale.NetProceeds * share;
+                    saleProceedsOriginal = sale.NetProceedsOriginal * share;
+                }
+                else
+                {
+                    saleCost = sale.Cost;
+                    saleCostOriginal = sale.CostOriginal;
+                    saleProceeds = sale.NetProceeds;
+                    saleProceedsOriginal = sale.NetProceedsOriginal;
+                }
+
+                if (sale.Approximate)
+                {
+                    approximate++;
+                }
+                anyForeign |= sale.IsForeign;
+
+                if (!result.ByCompany.TryGetValue(sale.CompanyName, out var sold))
+                {
+                    sold = new SoldCompany { CompanyId = companies[sale.CompanyName].Id };
+                    result.ByCompany[sale.CompanyName] = sold;
+                }
+
+                sold.Cost += saleCost;
+                sold.NetProceeds += saleProceeds;
+                sold.CostOriginal += saleCostOriginal;
+                sold.NetProceedsOriginal += saleProceedsOriginal;
+                cost += saleCost;
+                proceeds += saleProceeds;
+            }
+
+            if (result.ByCompany.Count > 0)
+            {
+                await ApplySoldStatusAsync(result, companies, isAll, purchasesView, from, toExclusive, cutoff, cancellationToken);
+            }
+
+            result.Cost = Round(cost);
+            result.NetProceeds = Round(proceeds);
+            foreach (var sold in result.ByCompany.Values)
+            {
+                sold.Cost = Round(sold.Cost);
+                sold.NetProceeds = Round(sold.NetProceeds);
+                sold.CostOriginal = Round(sold.CostOriginal);
+                sold.NetProceedsOriginal = Round(sold.NetProceedsOriginal);
+            }
+
+            if (anyForeign)
+            {
+                result.Notes.Add("Lo vendido se convierte con el tipo de cambio guardado en cada venta y en sus compras.");
+            }
+            if (approximate > 0)
+            {
+                result.Notes.Add($"{approximate} {(approximate == 1 ? "venta usa" : "ventas usan")} el tipo de cambio actual porque faltaba el guardado (cifra aproximada).");
+            }
+            if (missing > 0)
+            {
+                result.Notes.Add($"{missing} {(missing == 1 ? "venta en otra divisa sin tipo de cambio no se incluye" : "ventas en otra divisa sin tipo de cambio no se incluyen")}.");
+            }
+            if (deletedCompanySales > 0)
+            {
+                result.Notes.Add($"{deletedCompanySales} {(deletedCompanySales == 1 ? "venta de una empresa borrada no cuenta" : "ventas de empresas borradas no cuentan")}.");
+            }
+
+            return result;
+        }
+
         // ---------------------------------------------------------------- Auxiliares
 
-        /// <summary>Empresas por nombre (las operaciones se enlazan por nombre)</summary>
+        /// <summary>
+        /// Marca cada empresa con ventas como Vendida o Parcial según le queden acciones en la vista (RF-4) y suma los
+        /// dividendos de las vendidas del todo (RF-3). En «Compras del periodo» los dividendos ya cuentan todos en
+        /// PeriodDividends, así que aquí no se suman.
+        /// </summary>
+        private async Task ApplySoldStatusAsync(
+            SoldSummary result,
+            Dictionary<string, CompanyDetail> companies,
+            bool isAll,
+            bool purchasesView,
+            DateTime? from,
+            DateTime? toExclusive,
+            DateTime? cutoff,
+            CancellationToken cancellationToken)
+        {
+            var names = result.ByCompany.Keys.ToList();
+            var operations = await _context.Operations
+                .AsNoTracking()
+                .Where(o => names.Contains(o.CompanyName))
+                .ToListAsync(cancellationToken);
+
+            var current = await GetCurrentFactorsAsync();
+            decimal dividends = 0;
+            foreach (var (name, sold) in result.ByCompany)
+            {
+                var company = companies[name];
+                var own = operations.Where(o => o.CompanyName == name).ToList();
+                bool hasShares;
+                if (isAll)
+                {
+                    hasShares = company.NumberOfShares > 0;
+                }
+                else if (purchasesView)
+                {
+                    hasShares = own.Any(o => (o.Type == TypeBuy || o.Type == TypeTransfer) && o.CloseDate == null
+                                             && o.Date >= from!.Value && o.Date < toExclusive!.Value);
+                }
+                else
+                {
+                    var open = own.Where(o => o.Type != TypeDividend && o.Date.Date <= cutoff!.Value
+                                              && (o.CloseDate == null || o.CloseDate.Value.Date > cutoff.Value)).ToList();
+                    hasShares = open.Where(o => o.Type == TypeBuy || o.Type == TypeTransfer).Sum(o => o.NumberOfShares)
+                                - open.Where(o => o.Type == TypeSell).Sum(o => o.NumberOfShares) > 0;
+                }
+
+                sold.Status = hasShares ? SoldStatus.Partial : SoldStatus.Sold;
+                if (sold.Status == SoldStatus.Partial || purchasesView)
+                {
+                    continue;
+                }
+
+                // Dividendos de la vendida: todos (Total histórico) o hasta el corte («Cartera al cierre»)
+                sold.DividendsOriginal = isAll
+                    ? company.TotalDividends
+                    : own.Where(o => o.Type == TypeDividend && o.Date.Date <= cutoff!.Value).Sum(o => o.Amount);
+
+                var currency = CurrencyFormatter.Normalize(company.CurrencyCode);
+                decimal? factor = current.FactorFor(currency);
+                if (cutoff.HasValue && cutoff.Value != DateTime.Today && currency != current.BaseCurrency)
+                {
+                    var rates = await _currencyHistoryService.GetRatesAtAsync(currency, current.BaseCurrency, new[] { cutoff.Value }, cancellationToken);
+                    if (rates.TryGetValue(cutoff.Value, out var rate))
+                    {
+                        factor = rate;
+                    }
+                }
+
+                sold.DividendsOriginal = Round(sold.DividendsOriginal);
+                dividends += sold.DividendsOriginal * (factor ?? 0m);
+            }
+
+            result.Dividends = Round(dividends);
+        }
+
+        /// <summary>
+        /// Empresas por nombre (las operaciones se enlazan por nombre), con la divisa de su país como en
+        /// CompanyService (EUR sin país o con un país que ya no está en el catálogo)
+        /// </summary>
         private async Task<Dictionary<string, CompanyDetail>> LoadCompaniesAsync()
         {
             var companies = await _context.CompanyDetails.AsNoTracking().ToListAsync();
+            var currencies = await _context.Countries
+                .AsNoTracking()
+                .ToDictionaryAsync(c => c.Code, c => c.CurrencyCode);
+            foreach (var company in companies)
+            {
+                company.CurrencyCode = company.CountryCode != null && currencies.TryGetValue(company.CountryCode, out var currency)
+                    ? CurrencyFormatter.Normalize(currency)
+                    : CurrencyFormatter.DefaultCurrency;
+            }
+
             return companies
                 .GroupBy(c => c.Name)
                 .ToDictionary(g => g.Key, g => g.First());

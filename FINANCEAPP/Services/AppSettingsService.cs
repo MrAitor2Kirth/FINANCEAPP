@@ -19,6 +19,8 @@ namespace FINANCEAPP.Services
         private const string ChartShowCandlesKey = "CompanyChart.ShowCandles";
         private const string ChartShowVolumeKey = "CompanyChart.ShowVolume";
         private const string ChartShowMarksKey = "CompanyChart.ShowMarks";
+        // Selector «Cartera actual / Incluir vendidas» de /companies (SPEC-01-11)
+        private const string CompaniesIncludeSoldKey = "Companies.IncludeSold";
 
         private readonly AppDbContext _context;
         private AppLogoImage? _cachedLogo;
@@ -302,6 +304,40 @@ namespace FINANCEAPP.Services
                 Console.WriteLine($"Error al guardar las preferencias del gráfico: {ex.Message}");
                 _context.ChangeTracker.Clear();
                 return AppSettingResult.Fail("No se pudieron guardar las preferencias del gráfico.");
+            }
+        }
+
+        public async Task<bool> GetCompaniesIncludeSoldAsync()
+        {
+            try
+            {
+                var value = await _context.AppSettings
+                    .AsNoTracking()
+                    .Where(s => s.Key == CompaniesIncludeSoldKey)
+                    .Select(s => s.TextValue)
+                    .FirstOrDefaultAsync();
+                return value == "true";
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error al leer la preferencia de empresas vendidas: {ex.Message}");
+                return false;
+            }
+        }
+
+        public async Task<AppSettingResult> SaveCompaniesIncludeSoldAsync(bool includeSold)
+        {
+            try
+            {
+                await UpsertTextAsync(CompaniesIncludeSoldKey, includeSold ? "true" : "false");
+                await _context.SaveChangesAsync();
+                return AppSettingResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error al guardar la preferencia de empresas vendidas: {ex.Message}");
+                _context.ChangeTracker.Clear();
+                return AppSettingResult.Fail("No se pudo guardar la preferencia.");
             }
         }
 

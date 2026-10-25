@@ -71,6 +71,17 @@ namespace FINANCEAPP.Services
         /// Guarda las capas opcionales del gráfico de cotización (claves CompanyChart.*)
         /// </summary>
         Task<AppSettingResult> SaveChartPreferencesAsync(ChartPreferences preferences);
+
+        /// <summary>
+        /// Devuelve si /companies incluye las empresas vendidas (SPEC-01-11, clave Companies.IncludeSold).
+        /// Sin ajuste guardado, false («Cartera actual»).
+        /// </summary>
+        Task<bool> GetCompaniesIncludeSoldAsync();
+
+        /// <summary>
+        /// Guarda la elección «Cartera actual / Incluir vendidas» de /companies (SPEC-01-11)
+        /// </summary>
+        Task<AppSettingResult> SaveCompaniesIncludeSoldAsync(bool includeSold);
     }
 
     /// <summary>

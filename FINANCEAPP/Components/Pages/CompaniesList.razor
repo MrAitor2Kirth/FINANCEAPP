@@ -3,6 +3,7 @@
 @inject ICountryService CountryService
 @inject IExchangeRateService ExchangeRateService
 @inject IPortfolioPeriodService PortfolioPeriodService
+@inject IAppSettingsService AppSettingsService
 @using System.Globalization
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
@@ -121,6 +122,11 @@
                     }
                 </div>
             }
+            @* Cartera actual o con lo vendido de la vista (SPEC-01-11, RF-1): en todos los periodos *@
+            <div class="btn-group ms-md-2" role="group" aria-label="Empresas vendidas">
+                <button type="button" class="btn btn-sm @(!includeSold ? "btn-secondary" : "btn-outline-secondary")" disabled="@isLoadingPeriod" @onclick="() => SetIncludeSold(false)">Cartera actual</button>
+                <button type="button" class="btn btn-sm @(includeSold ? "btn-secondary" : "btn-outline-secondary")" disabled="@isLoadingPeriod" @onclick="() => SetIncludeSold(true)">Incluir vendidas</button>
+            </div>
             <span class="fw-bold ms-1">@periodFilter.Label</span>
             @if (isLoadingPeriod)
             {
@@ -138,6 +144,13 @@
         @foreach (var warning in periodSummary?.Warnings ?? new List<string>())
         {
             <div class="alert alert-warning py-1 px-2 small mb-2"><i class="bi bi-exclamation-triangle me-1"></i>@warning</div>
+        }
+        @if (includeSold && soldSummary != null)
+        {
+            @foreach (var note in soldSummary.Notes)
+            {
+                <p class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i>@note</p>
+            }
         }
 
         <!-- Tarjetas de resumen (SPEC-01-08): bloque «Cartera» y bloque «Rentabilidad y diversificación».
@@ -178,11 +191,11 @@
             </p>
         }
 
-        @if (periodSummary != null && !periodSummary.HasData)
+        @if (periodSummary != null && !periodSummary.HasData && !(includeSold && soldSummary?.HasData == true))
         {
             <p class="stat-note small text-muted"><i class="bi bi-info-circle me-1"></i>@(periodSummary.IsFuture ? "Sin datos para un periodo futuro." : periodView == PeriodSummaryView.Purchases ? "Sin compras en este periodo que sigas teniendo." : "No tenías acciones en esa fecha.")</p>
         }
-        @if (periodSummary != null && periodSummary.SoldPurchasesAmount > 0)
+        @if (periodSummary != null && periodSummary.SoldPurchasesAmount > 0 && !includeSold)
         {
             <p class="stat-note small text-muted">
                 <i class="bi bi-info-circle me-1"></i>@CurrencyFormatter.Format(periodSummary.SoldPurchasesAmount, CardTotals.BaseCurrencyCode) de compras de este periodo ya vendidas. <a href="/sales-history">Ver histórico de ventas</a>
@@ -246,21 +259,21 @@
                     @* SPEC-01-10: con un periodo, la tabla muestra las empresas y las cifras del periodo *@
                     <div class="small text-muted px-3 pt-2">
                         <i class="bi bi-info-circle me-1"></i>
-                        Mostrando @periodSummary.Companies.Count de @companies.Count empresas @PeriodListText. Pulsa «Lista extendible» para ver todas.
+                        Mostrando @ShortRows.Count de @companies.Count empresas @PeriodListText@(includeSold ? " o con ventas" : ""). Pulsa «Lista extendible» para ver todas.
                     </div>
                 }
-                else if (!isExtended && investedCompanies.Count == 0)
+                else if (!isExtended && ShortRows.Count == 0)
                 {
                     <div class="alert alert-info m-3 mb-3">
                         <i class="bi bi-info-circle me-1"></i>
                         No hay empresas con inversión. Pulsa «Lista extendible» para ver todo el catálogo.
                     </div>
                 }
-                else if (!isExtended && investedCompanies.Count < companies.Count)
+                else if (!isExtended && ShortRows.Count < companies.Count)
                 {
                     <div class="small text-muted px-3 pt-2">
                         <i class="bi bi-info-circle me-1"></i>
-                        Mostrando @investedCompanies.Count de @companies.Count empresas (solo las que tienen inversión). Pulsa «Lista extendible» para ver todas.
+                        Mostrando @ShortRows.Count de @companies.Count empresas (@(includeSold ? "las que tienen inversión y las vendidas" : "solo las que tienen inversión")). Pulsa «Lista extendible» para ver todas.
                     </div>
                 }
                 <div class="table-responsive" hidden="@(visibleCompanies.Count == 0)">
@@ -278,7 +291,8 @@
                         <tbody>
                             @foreach (var company in visibleCompanies)
                             {
-                                <tr>
+                                var sold = SoldInfo(company);
+                                <tr class="@(sold?.Status == SoldStatus.Sold ? "row-sold" : null)">
                                     <td>
                                         @if (isExtended)
                                         {
@@ -286,6 +300,10 @@
                                             <div class="mt-1 d-flex flex-wrap gap-1">
                                                 <span class="badge bg-primary">@company.Ticker</span>
                                                 <span class="badge @GetSectorBadgeClass(company.Sector)">@company.Sector</span>
+                                                @if (sold != null)
+                                                {
+                                                    <span class="badge @(sold.Status == SoldStatus.Sold ? "badge-sold" : "badge-partial")" title="Incluye lo vendido">@(sold.Status == SoldStatus.Sold ? "Vendida" : "Parcial")</span>
+                                                }
                                             </div>
                                         }
                                         else
@@ -294,6 +312,10 @@
                                                 <strong>@company.Name</strong>
                                                 <span class="badge bg-primary">@company.Ticker</span>
                                                 <span class="badge @GetSectorBadgeClass(company.Sector)">@company.Sector</span>
+                                                @if (sold != null)
+                                                {
+                                                    <span class="badge @(sold.Status == SoldStatus.Sold ? "badge-sold" : "badge-partial")" title="Incluye lo vendido">@(sold.Status == SoldStatus.Sold ? "Vendida" : "Parcial")</span>
+                                                }
                                             </div>
                                         }
                                     </td>
@@ -347,11 +369,11 @@
                                         {
                                             <div class="cell-pair">
                                                 <span class="cell-label">Inicial</span>
-                                                <span>@CurrencyFormatter.Format(company.TotalInvestedInitial, company.CurrencyCode)</span>
+                                                <span>@CurrencyFormatter.Format(SoldPositionsSummary.Invested(company, sold), company.CurrencyCode)</span>
                                             </div>
                                             <div class="cell-pair">
                                                 <span class="cell-label">Valor</span>
-                                                <strong>@CurrencyFormatter.Format(company.TotalInvestedValue, company.CurrencyCode)</strong>
+                                                <strong>@CurrencyFormatter.Format(SoldPositionsSummary.Value(company, sold), company.CurrencyCode)</strong>
                                             </div>
                                             <div class="cell-pair">
                                                 <span class="cell-label">Nº acciones</span>
@@ -376,7 +398,7 @@
                                         }
                                         else
                                         {
-                                            <strong>@CurrencyFormatter.Format(company.TotalInvestedValue, company.CurrencyCode)</strong>
+                                            <strong>@CurrencyFormatter.Format(SoldPositionsSummary.Value(company, sold), company.CurrencyCode)</strong>
                                         }
                                     </td>
                                     @if (isExtended)
@@ -587,7 +609,19 @@
     private List<CompanyDetail> investedCompanies = new();
     private ConvertedCompanyTotals investedTotals = new();
     private Dictionary<int, decimal> weights = new();
-    private List<CompanyDetail> visibleCompanies => isExtended ? companies ?? new() : periodSummary?.Companies ?? investedCompanies;
+    private List<CompanyDetail> visibleCompanies => isExtended
+        ? (includeSold && soldRows != null ? soldRows.ExtendedRows : companies ?? new())
+        : ShortRows;
+
+    // Incluir lo vendido de la vista (SPEC-01-11): se recuerda en AppSettings
+    private bool includeSold;
+    private SoldSummary? soldSummary;
+    private SoldRows? soldRows;
+    private ConvertedCompanyTotals? soldTotals;
+    private List<CompanyDetail> OpenShortRows => periodSummary?.Companies ?? investedCompanies;
+    private List<CompanyDetail> ShortRows => includeSold && soldRows != null ? soldRows.ShortRows : OpenShortRows;
+    private SoldCompany? SoldInfo(CompanyDetail company) =>
+        includeSold && soldRows != null && soldRows.Info.TryGetValue(company.Id, out var info) ? info : null;
 
     // Las filas del periodo son copias: las acciones de fila actúan sobre la empresa real (SPEC-01-10, RF-4)
     private CompanyDetail RealCompany(CompanyDetail company) => companies?.FirstOrDefault(c => c.Id == company.Id) ?? company;
@@ -622,10 +656,12 @@
     };
 
     // Lo que pintan las tarjetas: el periodo elegido o, en Total histórico, las empresas con inversión de hoy
-    private ConvertedCompanyTotals CardTotals => periodSummary?.Totals ?? investedTotals;
-    private List<CompanyDetail> CardCompanies => periodSummary?.Companies ?? investedCompanies;
+    private ConvertedCompanyTotals CardTotals => includeSold && soldTotals != null ? soldTotals : periodSummary?.Totals ?? investedTotals;
+    private List<CompanyDetail> CardCompanies => ShortRows;
     private int CardSectorsCount => CardCompanies.Select(c => c.Sector).Distinct().Count();
-    private decimal? CardDividendYield => InvestedCompaniesSummary.AverageDividendYield(CardCompanies);
+    private decimal? CardDividendYield => includeSold && soldRows != null
+        ? SoldPositionsSummary.AverageDividendYield(CardCompanies, soldRows.Info)
+        : InvestedCompaniesSummary.AverageDividendYield(CardCompanies);
     private decimal? CardReturn => InvestedCompaniesSummary.WeightedReturnPercent(CardTotals);
     private decimal? CardReturnWithDividends => InvestedCompaniesSummary.WeightedReturnWithDividendsPercent(CardTotals);
     private decimal? CardResult => InvestedCompaniesSummary.UnrealizedResult(CardTotals);
@@ -711,6 +747,7 @@
         if (filter.Mode == SalesPeriodMode.All)
         {
             periodSummary = null;
+            await RefreshSoldSafeAsync();
             return;
         }
 
@@ -727,6 +764,7 @@
             if (periodCts == cts)
             {
                 periodSummary = summary;
+                await RefreshSoldAsync(cts.Token);
             }
         }
         catch (OperationCanceledException)
@@ -743,6 +781,63 @@
             {
                 isLoadingPeriod = false;
             }
+        }
+    }
+
+    /// <summary>
+    /// Cambia entre «Cartera actual» e «Incluir vendidas» (SPEC-01-11, RF-1) y recuerda la elección
+    /// </summary>
+    private async Task SetIncludeSold(bool value)
+    {
+        if (includeSold == value)
+        {
+            return;
+        }
+
+        includeSold = value;
+        await AppSettingsService.SaveCompaniesIncludeSoldAsync(value);
+        isLoadingPeriod = true;
+        try
+        {
+            await RefreshSoldSafeAsync();
+        }
+        finally
+        {
+            isLoadingPeriod = false;
+        }
+    }
+
+    /// <summary>
+    /// Lo vendido de la vista actual sumado a las tarjetas y al listado (SPEC-01-11). Sin «Incluir vendidas» lo vacía.
+    /// </summary>
+    private async Task RefreshSoldAsync(CancellationToken cancellationToken = default)
+    {
+        if (!includeSold || companies == null)
+        {
+            soldSummary = null;
+            soldRows = null;
+            soldTotals = null;
+            return;
+        }
+
+        var summary = await PortfolioPeriodService.GetSoldAsync(periodFilter, periodView, cancellationToken);
+        soldSummary = summary;
+        soldTotals = SoldPositionsSummary.Combine(periodSummary?.Totals ?? investedTotals, summary);
+        soldRows = SoldPositionsSummary.BuildRows(OpenShortRows, companies, summary);
+    }
+
+    private async Task RefreshSoldSafeAsync()
+    {
+        try
+        {
+            await RefreshSoldAsync();
+        }
+        catch (Exception ex)
+        {
+            soldSummary = null;
+            soldRows = null;
+            soldTotals = null;
+            periodError = $"No se pudo calcular lo vendido: {ex.Message}";
         }
     }
 
@@ -779,6 +874,7 @@
     /// </summary>
     protected override async Task OnInitializedAsync()
     {
+        includeSold = await AppSettingsService.GetCompaniesIncludeSoldAsync();
         await LoadCompanies();
     }
 
@@ -836,6 +932,7 @@
             investedCompanies = InvestedCompaniesSummary.GetInvested(companies);
             investedTotals = await ExchangeRateService.GetConvertedTotalsAsync(investedCompanies);
             weights = InvestedCompaniesSummary.GetWeights(investedTotals);
+            await RefreshSoldSafeAsync();
         }
         catch (Exception ex)
         {

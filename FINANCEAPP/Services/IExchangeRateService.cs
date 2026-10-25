@@ -122,6 +122,65 @@ namespace FINANCEAPP.Services
     }
 
     /// <summary>
+    /// Una venta del histórico convertida a la divisa base (SPEC-01-11). En la divisa de la empresa,
+    /// cobrado neto − coste = beneficio guardado; convertido, cada parte usa su tipo guardado (SPEC-02-05).
+    /// </summary>
+    public class ConvertedSale
+    {
+        public int SaleHistoryId { get; set; }
+        public string CompanyName { get; set; } = string.Empty;
+        public DateTime SaleDate { get; set; }
+
+        /// <summary>Acciones vendidas</summary>
+        public decimal Shares { get; set; }
+
+        /// <summary>true si la venta es en otra divisa distinta de la base</summary>
+        public bool IsForeign { get; set; }
+
+        /// <summary>true si algún tipo guardado faltaba y se usó el actual (o no había compras enlazadas)</summary>
+        public bool Approximate { get; set; }
+
+        /// <summary>true si no hay ningún tipo: la venta no se puede convertir y queda fuera</summary>
+        public bool MissingRate { get; set; }
+
+        /// <summary>Importe de la venta convertido</summary>
+        public decimal Amount { get; set; }
+
+        /// <summary>Comisiones convertidas (la de la Venta y las de sus compras cerradas)</summary>
+        public decimal Commission { get; set; }
+
+        /// <summary>Coste en la divisa de la empresa: importe de las compras cerradas con su comisión</summary>
+        public decimal CostOriginal { get; set; }
+
+        /// <summary>Cobrado neto en la divisa de la empresa: importe − comisión de la Venta</summary>
+        public decimal NetProceedsOriginal { get; set; }
+
+        /// <summary>Coste convertido con el tipo de cada compra cerrada</summary>
+        public decimal Cost { get; set; }
+
+        /// <summary>Cobrado neto convertido con el tipo de la Venta</summary>
+        public decimal NetProceeds { get; set; }
+
+        /// <summary>Resultado realizado convertido</summary>
+        public decimal Profit => NetProceeds - Cost;
+
+        /// <summary>Compras cerradas por la venta (vacío en ventas sin compras enlazadas)</summary>
+        public List<ConvertedSaleLot> Lots { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Una compra cerrada por una venta, con su coste (importe con comisión) en la divisa de la empresa y convertido
+    /// </summary>
+    public class ConvertedSaleLot
+    {
+        public int OperationId { get; set; }
+        public DateTime Date { get; set; }
+        public decimal Shares { get; set; }
+        public decimal CostOriginal { get; set; }
+        public decimal Cost { get; set; }
+    }
+
+    /// <summary>
     /// Una línea de la ventana «Detalles»: concepto, importe original y, si hay tipo, importe convertido
     /// </summary>
     public class ExchangeDetailLine
@@ -205,6 +264,13 @@ namespace FINANCEAPP.Services
         /// <param name="sales">Ventas del histórico</param>
         /// <param name="currencyByCompany">Divisa de cada empresa por nombre</param>
         Task<ConvertedSaleTotals> GetConvertedSaleTotalsAsync(IEnumerable<SaleHistory> sales, IReadOnlyDictionary<string, string> currencyByCompany);
+
+        /// <summary>
+        /// Cada venta del histórico convertida a la divisa base con las mismas reglas que
+        /// <see cref="GetConvertedSaleTotalsAsync"/> (SPEC-01-11): coste = importe de las compras cerradas con su
+        /// comisión, cobrado neto = importe − comisión de la Venta, también en la divisa de la empresa y por lote.
+        /// </summary>
+        Task<List<ConvertedSale>> GetConvertedSalesAsync(IEnumerable<SaleHistory> sales, IReadOnlyDictionary<string, string> currencyByCompany);
 
         /// <summary>Datos de «Detalles» de una operación en otra divisa</summary>
         Task<ExchangeDetails> GetOperationDetailsAsync(Operation operation);

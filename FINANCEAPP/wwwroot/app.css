@@ -693,6 +693,10 @@ button.chart-legend-item:hover { border-color: var(--line); }
 .companies-table--compact th,
 .companies-table--compact td { white-space: nowrap; }
 .companies-table--compact td { padding-top: 0.35rem; padding-bottom: 0.35rem; }
+/* SPEC-01-11: empresas vendidas con «Incluir vendidas» (fila de otro color si ya no quedan acciones) */
+.companies-table tr.row-sold > * { background-color: var(--paper-2); color: var(--ink-soft); }
+.companies-table .badge-sold { background-color: var(--ink-soft); color: #fff; }
+.companies-table .badge-partial { background-color: transparent; color: var(--ink-soft); border: 1px solid var(--ink-soft); }
 
 
 /* ==========================================================================

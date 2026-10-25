@@ -19,6 +19,72 @@ namespace FINANCEAPP.Services
         /// Descarga el histórico de cotización y de tipos que falte.
         /// </summary>
         Task<PeriodSummary> GetClosingSummaryAsync(SalesPeriodFilter filter, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Lo vendido dentro de la vista (SPEC-01-11, RF-5): con Total histórico todas las ventas; en «Cartera al cierre»
+        /// las de fecha ≤ corte; en «Compras del periodo» las compras del periodo ya vendidas, con su parte del cobrado.
+        /// Coste, cobrado neto y dividendos de las vendidas se convierten con los tipos guardados (SPEC-02-05).
+        /// </summary>
+        Task<SoldSummary> GetSoldAsync(SalesPeriodFilter filter, PeriodSummaryView view, CancellationToken cancellationToken = default);
+    }
+
+    /// <summary>
+    /// Estado de una empresa con ventas en la vista (SPEC-01-11, RF-4)
+    /// </summary>
+    public enum SoldStatus
+    {
+        /// <summary>Sin acciones en la vista: chip «Vendida» y fila de otro color</summary>
+        Sold,
+        /// <summary>Le quedan acciones: chip «Parcial»</summary>
+        Partial
+    }
+
+    /// <summary>
+    /// Lo vendido de una empresa dentro de la vista (SPEC-01-11)
+    /// </summary>
+    public class SoldCompany
+    {
+        public int CompanyId { get; set; }
+        public SoldStatus Status { get; set; }
+
+        /// <summary>Coste de lo vendido en la divisa base</summary>
+        public decimal Cost { get; set; }
+
+        /// <summary>Cobrado neto en la divisa base</summary>
+        public decimal NetProceeds { get; set; }
+
+        /// <summary>Coste de lo vendido en la divisa de la empresa (para la fila)</summary>
+        public decimal CostOriginal { get; set; }
+
+        /// <summary>Cobrado neto en la divisa de la empresa (para la fila)</summary>
+        public decimal NetProceedsOriginal { get; set; }
+
+        /// <summary>Dividendos de la vista en la divisa de la empresa (solo de las vendidas del todo)</summary>
+        public decimal DividendsOriginal { get; set; }
+    }
+
+    /// <summary>
+    /// Lo vendido de la vista para sumarlo a las tarjetas y al listado de /companies (SPEC-01-11)
+    /// </summary>
+    public class SoldSummary
+    {
+        /// <summary>Coste de lo vendido en la divisa base</summary>
+        public decimal Cost { get; set; }
+
+        /// <summary>Cobrado neto en la divisa base</summary>
+        public decimal NetProceeds { get; set; }
+
+        /// <summary>Dividendos de las empresas vendidas del todo, en la divisa base</summary>
+        public decimal Dividends { get; set; }
+
+        /// <summary>Empresas con ventas en la vista, por nombre (las operaciones se enlazan por nombre)</summary>
+        public Dictionary<string, SoldCompany> ByCompany { get; set; } = new();
+
+        /// <summary>Avisos: tipos de cada venta, ventas aproximadas, sin tipo o de empresas borradas</summary>
+        public List<string> Notes { get; set; } = new();
+
+        /// <summary>true si hay alguna venta en la vista</summary>
+        public bool HasData => ByCompany.Count > 0;
     }
 
     /// <summary>
