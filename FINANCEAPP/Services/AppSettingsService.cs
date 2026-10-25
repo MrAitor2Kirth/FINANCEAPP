@@ -21,6 +21,16 @@ namespace FINANCEAPP.Services
         private const string ChartShowMarksKey = "CompanyChart.ShowMarks";
         // Selector «Cartera actual / Incluir vendidas» de /companies (SPEC-01-11)
         private const string CompaniesIncludeSoldKey = "Companies.IncludeSold";
+        // JSON para la IA local y alertas (SPEC-17-03)
+        private const string AiFolderKey = "AiExport.Folder";
+        private const string AiFullDaysKey = "AiExport.FullDays";
+        private const string AiCompactDaysKey = "AiExport.CompactDays";
+        private const string AlertCompanyKey = "Alerts.MaxCompanyPct";
+        private const string AlertSectorKey = "Alerts.MaxSectorPct";
+        private const string AlertForeignKey = "Alerts.MaxForeignPct";
+        private const string AlertDropKey = "Alerts.MaxDrop7dPct";
+        private const string AlertLiquidityKey = "Alerts.MinLiquidityPct";
+        private const string AlertStaleKey = "Alerts.StalePriceDays";
 
         private readonly AppDbContext _context;
         private AppLogoImage? _cachedLogo;
@@ -338,6 +348,87 @@ namespace FINANCEAPP.Services
                 Console.WriteLine($"Error al guardar la preferencia de empresas vendidas: {ex.Message}");
                 _context.ChangeTracker.Clear();
                 return AppSettingResult.Fail("No se pudo guardar la preferencia.");
+            }
+        }
+
+        public async Task<AiExportSettings> GetAiExportSettingsAsync()
+        {
+            var settings = new AiExportSettings();
+            try
+            {
+                var keys = new[] { AiFolderKey, AiFullDaysKey, AiCompactDaysKey, AlertCompanyKey, AlertSectorKey, AlertForeignKey, AlertDropKey, AlertLiquidityKey, AlertStaleKey };
+                var rows = await _context.AppSettings
+                    .AsNoTracking()
+                    .Where(s => keys.Contains(s.Key))
+                    .ToDictionaryAsync(s => s.Key, s => s.TextValue);
+
+                decimal Dec(string key, decimal fallback) =>
+                    rows.TryGetValue(key, out var v) && decimal.TryParse(v, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : fallback;
+                int Int(string key, int fallback) =>
+                    rows.TryGetValue(key, out var v) && int.TryParse(v, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var i) ? i : fallback;
+
+                settings.Folder = rows.TryGetValue(AiFolderKey, out var folder) ? folder ?? string.Empty : string.Empty;
+                settings.FullDays = Int(AiFullDaysKey, settings.FullDays);
+                settings.CompactDays = Int(AiCompactDaysKey, settings.CompactDays);
+                settings.MaxCompanyPct = Dec(AlertCompanyKey, settings.MaxCompanyPct);
+                settings.MaxSectorPct = Dec(AlertSectorKey, settings.MaxSectorPct);
+                settings.MaxForeignPct = Dec(AlertForeignKey, settings.MaxForeignPct);
+                settings.MaxDrop7dPct = Dec(AlertDropKey, settings.MaxDrop7dPct);
+                settings.MinLiquidityPct = Dec(AlertLiquidityKey, settings.MinLiquidityPct);
+                settings.StalePriceDays = Int(AlertStaleKey, settings.StalePriceDays);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error al leer los ajustes de la IA: {ex.Message}");
+            }
+
+            return settings;
+        }
+
+        public async Task<AppSettingResult> SaveAiExportSettingsAsync(AiExportSettings settings)
+        {
+            if (settings.FullDays < 1 || settings.FullDays > 366)
+            {
+                return AppSettingResult.Fail("Los días de la serie completa deben estar entre 1 y 366.");
+            }
+            if (settings.CompactDays < settings.FullDays || settings.CompactDays > 3650)
+            {
+                return AppSettingResult.Fail("Los días de la serie compacta deben ser al menos los de la completa y como mucho 3.650.");
+            }
+            if (settings.MaxCompanyPct is <= 0 or > 100 || settings.MaxSectorPct is <= 0 or > 100
+                || settings.MaxForeignPct is <= 0 or > 100 || settings.MinLiquidityPct is < 0 or > 100)
+            {
+                return AppSettingResult.Fail("Los porcentajes de las alertas deben estar entre 0 y 100.");
+            }
+            if (settings.MaxDrop7dPct is >= 0 or < -100)
+            {
+                return AppSettingResult.Fail("La caída de 7 días debe ser un porcentaje negativo (por ejemplo, −8).");
+            }
+            if (settings.StalePriceDays is < 1 or > 365)
+            {
+                return AppSettingResult.Fail("Los días sin actualizar el precio deben estar entre 1 y 365.");
+            }
+
+            try
+            {
+                string D(decimal v) => v.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                await UpsertTextAsync(AiFolderKey, settings.Folder?.Trim() ?? string.Empty);
+                await UpsertTextAsync(AiFullDaysKey, settings.FullDays.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                await UpsertTextAsync(AiCompactDaysKey, settings.CompactDays.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                await UpsertTextAsync(AlertCompanyKey, D(settings.MaxCompanyPct));
+                await UpsertTextAsync(AlertSectorKey, D(settings.MaxSectorPct));
+                await UpsertTextAsync(AlertForeignKey, D(settings.MaxForeignPct));
+                await UpsertTextAsync(AlertDropKey, D(settings.MaxDrop7dPct));
+                await UpsertTextAsync(AlertLiquidityKey, D(settings.MinLiquidityPct));
+                await UpsertTextAsync(AlertStaleKey, settings.StalePriceDays.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                await _context.SaveChangesAsync();
+                return AppSettingResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error al guardar los ajustes de la IA: {ex.Message}");
+                _context.ChangeTracker.Clear();
+                return AppSettingResult.Fail("No se pudieron guardar los ajustes de la IA.");
             }
         }
 

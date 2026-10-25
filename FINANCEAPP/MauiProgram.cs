@@ -197,6 +197,9 @@ namespace FINANCEAPP
             builder.Services.AddScoped<IBenchmarkIndexService, BenchmarkIndexService>();
             builder.Services.AddScoped<ICurrencyHistoryService, CurrencyHistoryService>();
             builder.Services.AddScoped<IPortfolioPeriodService, PortfolioPeriodService>();
+            // Capturas diarias de la cartera y JSON para IA local (SPEC-17-03)
+            builder.Services.AddScoped<IDailySnapshotService, DailySnapshotService>();
+            builder.Services.AddScoped<IAiPortfolioExportService, AiPortfolioExportService>();
             builder.Services.AddHttpClient<IClaudeDocumentReader, ClaudeDocumentReader>(client =>
             {
                 client.Timeout = TimeSpan.FromSeconds(60);
@@ -235,6 +238,7 @@ namespace FINANCEAPP
                 DatabaseSchemaUpgrader.EnsureCompanyNextDividendDateColumn(context);
                 DatabaseSchemaUpgrader.EnsureBenchmarkTables(context);
                 DatabaseSchemaUpgrader.EnsureCurrencyHistoryTables(context);
+                DatabaseSchemaUpgrader.EnsureDailySnapshotTables(context);
 
                 // Corrige inmuebles antiguos guardados con total invertido 0 (no tocaba el patrimonio)
                 DatabaseSchemaUpgrader.RepairPropertyTotals(context);
@@ -250,6 +254,18 @@ namespace FINANCEAPP
 
                 // Borra copias temporales de documentos abiertos en sesiones anteriores
                 PropertyDocumentService.CleanTempFiles();
+
+                // Capturas diarias (SPEC-17-03): rehace los días pendientes y hoy, y escribe el JSON para la IA.
+                // Sin descargas y en memoria; si falla, la app arranca igual y la marca queda para el siguiente intento.
+                try
+                {
+                    var dailySnapshots = scope.ServiceProvider.GetRequiredService<FINANCEAPP.Services.IDailySnapshotService>();
+                    Task.Run(() => dailySnapshots.RefreshAsync()).GetAwaiter().GetResult();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error al calcular las capturas diarias: {ex.Message}");
+                }
 
 #if DEBUG
                 var logger = scope.ServiceProvider.GetRequiredService<ILogger<AppDbContext>>();

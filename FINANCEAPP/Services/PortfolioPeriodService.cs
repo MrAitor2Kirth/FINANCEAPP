@@ -163,14 +163,7 @@ namespace FINANCEAPP.Services
                 foreach (var copy in copies)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    decimal? close = null;
-                    if (!string.IsNullOrWhiteSpace(copy.Ticker))
-                    {
-                        var series = ChartSeriesRef.ForCompany(copy.Id, copy.Ticker, copy.Name);
-                        await _priceHistoryService.EnsureDailyCoverageAsync(series, cutoff, cancellationToken);
-                        close = await _priceHistoryService.GetDailyCloseAtAsync(series, cutoff);
-                    }
-
+                    var close = await GetCloseAtAsync(copy, cutoff, cancellationToken);
                     if (close is > 0)
                     {
                         copy.LivePrice = close.Value;
@@ -348,7 +341,191 @@ namespace FINANCEAPP.Services
             return result;
         }
 
+        public async Task<CompanyBreakdown?> GetBreakdownAsync(string companyName, SalesPeriodFilter filter, PeriodSummaryView view, bool includeSold, CancellationToken cancellationToken = default)
+        {
+            var companies = await LoadCompaniesAsync();
+            if (!companies.TryGetValue(companyName, out var company))
+            {
+                return null;
+            }
+
+            var result = new CompanyBreakdown { CompanyName = company.Name, CurrencyCode = company.CurrencyCode };
+            var isAll = filter.Mode == SalesPeriodMode.All;
+            var (from, toExclusive) = filter.GetRange();
+            if (!isAll && (from == null || toExclusive == null || from.Value > DateTime.Today))
+            {
+                return result;
+            }
+
+            var purchasesView = !isAll && view == PeriodSummaryView.Purchases;
+            DateTime? cutoff = null;
+            if (!isAll && view == PeriodSummaryView.Closing)
+            {
+                cutoff = toExclusive!.Value.AddDays(-1).Date;
+                if (cutoff > DateTime.Today)
+                {
+                    cutoff = DateTime.Today;
+                }
+            }
+            result.ShowReturnWithDividends = !purchasesView;
+
+            var operations = await _context.Operations
+                .AsNoTracking()
+                .Where(o => o.CompanyName == companyName)
+                .ToListAsync(cancellationToken);
+
+            // Mismas operaciones que la fila de la vista (SPEC-01-09, RF-3 y RF-5; SPEC-01-10)
+            List<Operation> open;
+            if (isAll)
+            {
+                open = operations.Where(o => o.Type != TypeDividend && o.CloseDate == null).ToList();
+            }
+            else if (purchasesView)
+            {
+                open = operations.Where(o => (o.Type == TypeBuy || o.Type == TypeTransfer) && o.CloseDate == null
+                                             && o.Date >= from!.Value && o.Date < toExclusive!.Value).ToList();
+            }
+            else
+            {
+                open = operations.Where(o => o.Type != TypeDividend && o.Date.Date <= cutoff!.Value
+                                             && (o.CloseDate == null || o.CloseDate.Value.Date > cutoff.Value)).ToList();
+            }
+
+            // Precio de la vista: el de hoy o el cierre de la fecha de corte (como la copia de GetClosingSummaryAsync)
+            var price = company.LivePrice ?? company.CurrentPrice;
+            if (cutoff.HasValue && cutoff.Value != DateTime.Today && open.Count > 0)
+            {
+                var close = await GetCloseAtAsync(company, cutoff.Value, cancellationToken);
+                if (close is > 0)
+                {
+                    price = close.Value;
+                }
+                else
+                {
+                    result.Warnings.Add("Sin cotización guardada en la fecha de corte: se usa el precio actual (cifra aproximada).");
+                }
+            }
+
+            decimal invested = 0, value = 0, dividends = 0;
+            foreach (var operation in open)
+            {
+                var isOldSale = operation.Type == TypeSell;
+                var shares = isOldSale ? -operation.NumberOfShares : operation.NumberOfShares;
+                var cost = isOldSale ? -operation.Amount : operation.Amount;
+                var lineValue = shares * price;
+                invested += cost;
+                value += lineValue;
+                result.Lines.Add(new BreakdownLine
+                {
+                    Kind = isOldSale ? BreakdownLineKind.OldSale : BreakdownLineKind.OpenLot,
+                    Date = operation.Date,
+                    Label = isOldSale ? "Venta antigua" : operation.Type,
+                    Shares = shares,
+                    Price = operation.PricePerShare > 0 ? operation.PricePerShare : null,
+                    Cost = Round(cost),
+                    Value = Round(lineValue),
+                    Result = Round(lineValue - cost),
+                    ResultPercent = !isOldSale && cost > 0 ? Round((lineValue - cost) / cost * 100m) : null
+                });
+            }
+
+            // Lo vendido de la vista (SPEC-01-11): mismas reglas que GetSoldAsync, en la divisa de la empresa
+            if (includeSold)
+            {
+                var sales = await _context.SalesHistory
+                    .AsNoTracking()
+                    .Where(s => s.CompanyName == companyName)
+                    .ToListAsync(cancellationToken);
+                if (cutoff.HasValue)
+                {
+                    sales = sales.Where(s => s.SaleDate.Date <= cutoff.Value).ToList();
+                }
+
+                var converted = await _exchangeRateService.GetConvertedSalesAsync(
+                    sales, new Dictionary<string, string> { [company.Name] = company.CurrencyCode });
+                foreach (var sale in converted.Where(s => !s.MissingRate))
+                {
+                    decimal saleCost = sale.CostOriginal, saleProceeds = sale.NetProceedsOriginal, saleShares = sale.Shares;
+                    if (purchasesView)
+                    {
+                        var lots = sale.Lots.Where(l => l.Date >= from!.Value && l.Date < toExclusive!.Value).ToList();
+                        if (lots.Count == 0 || sale.Shares <= 0)
+                        {
+                            continue;
+                        }
+
+                        saleShares = lots.Sum(l => l.Shares);
+                        saleCost = lots.Sum(l => l.CostOriginal);
+                        saleProceeds = sale.NetProceedsOriginal * saleShares / sale.Shares;
+                    }
+
+                    if (sale.Approximate)
+                    {
+                        result.Warnings.Add($"La venta del {sale.SaleDate:dd/MM/yyyy} usa algún tipo de cambio actual porque faltaba el guardado.");
+                    }
+
+                    invested += saleCost;
+                    value += saleProceeds;
+                    result.Lines.Add(new BreakdownLine
+                    {
+                        Kind = BreakdownLineKind.Sale,
+                        Date = sale.SaleDate,
+                        Label = "Venta",
+                        Shares = -saleShares,
+                        Cost = Round(saleCost),
+                        Value = Round(saleProceeds),
+                        Result = Round(saleProceeds - saleCost),
+                        ResultPercent = saleCost > 0 ? Round((saleProceeds - saleCost) / saleCost * 100m) : null
+                    });
+                }
+            }
+
+            // Dividendos que cuenta la fila: todos (Total histórico) o hasta el corte; ninguno en «Compras del periodo»
+            if (!purchasesView)
+            {
+                foreach (var dividend in operations.Where(o => o.Type == TypeDividend && (!cutoff.HasValue || o.Date.Date <= cutoff.Value)))
+                {
+                    dividends += dividend.Amount;
+                    result.Lines.Add(new BreakdownLine
+                    {
+                        Kind = BreakdownLineKind.Dividend,
+                        Date = dividend.Date,
+                        Label = "Dividendo",
+                        Result = Round(dividend.Amount)
+                    });
+                }
+            }
+
+            result.Lines = result.Lines.OrderBy(l => l.Date).ThenBy(l => l.Kind).ToList();
+            result.Invested = Round(invested);
+            result.Value = Round(value);
+            result.Dividends = Round(dividends);
+            if (invested > 0)
+            {
+                result.ReturnPercent = Round((value - invested) / invested * 100m);
+                result.ReturnWithDividendsPercent = Round((value + dividends - invested) / invested * 100m);
+            }
+
+            return result;
+        }
+
         // ---------------------------------------------------------------- Auxiliares
+
+        /// <summary>
+        /// Precio de cierre de una empresa en una fecha (o del último día anterior); descarga el histórico que falte.
+        /// Null si la empresa no tiene ticker o no hay cotización.
+        /// </summary>
+        private async Task<decimal?> GetCloseAtAsync(CompanyDetail company, DateTime date, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(company.Ticker))
+            {
+                return null;
+            }
+
+            var series = ChartSeriesRef.ForCompany(company.Id, company.Ticker, company.Name);
+            await _priceHistoryService.EnsureDailyCoverageAsync(series, date, cancellationToken);
+            return await _priceHistoryService.GetDailyCloseAtAsync(series, date);
+        }
 
         /// <summary>
         /// Marca cada empresa con ventas como Vendida o Parcial según le queden acciones en la vista (RF-4) y suma los

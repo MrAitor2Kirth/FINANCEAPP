@@ -163,6 +163,153 @@ namespace FINANCEAPP.Data
         public DbSet<DividendPayment> DividendPayments { get; set; }
 
         /// <summary>
+        /// DbSet de las capturas diarias de la cartera (SPEC-17-03). Tabla DailyPortfolioSnapshots (datos derivados)
+        /// </summary>
+        public DbSet<DailyPortfolioSnapshot> DailyPortfolioSnapshots { get; set; }
+
+        /// <summary>
+        /// DbSet de la posición diaria de cada empresa (SPEC-17-03). Tabla DailyCompanySnapshots (datos derivados)
+        /// </summary>
+        public DbSet<DailyCompanySnapshot> DailyCompanySnapshots { get; set; }
+
+        /// <summary>
+        /// Clave de AppSettings con la fecha más antigua cuyas capturas diarias hay que rehacer (SPEC-17-03, RF-4).
+        /// 0001-01-01 = desde la primera operación.
+        /// </summary>
+        public const string DailySnapshotsDirtyKey = "DailySnapshots.DirtyFrom";
+
+        public override int SaveChanges(bool acceptAllChangesOnSuccess)
+        {
+            MarkDailySnapshotsDirty();
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+        }
+
+        public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+        {
+            MarkDailySnapshotsDirty();
+            return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        }
+
+        /// <summary>
+        /// Marca «recalcular desde X» (SPEC-17-03, RF-4) con la fecha más antigua que toca cualquier cambio pendiente de
+        /// guardar que mueva el patrimonio: operaciones de acciones, ventas, banco, fondos, refugio, inmuebles, el país
+        /// base o datos de empresa que cambian su divisa o su sector. Se guarda en el mismo SaveChanges (misma transacción).
+        /// Un único punto para no depender de que cada servicio se acuerde de llamarlo.
+        /// </summary>
+        private void MarkDailySnapshotsDirty()
+        {
+            DateTime? earliest = null;
+            void Take(object? value)
+            {
+                if (value is DateTime date && (earliest == null || date.Date < earliest.Value))
+                {
+                    earliest = date.Date;
+                }
+            }
+
+            void TakeDates(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, string property)
+            {
+                if (entry.State != EntityState.Added)
+                {
+                    Take(entry.OriginalValues[property]);
+                }
+                if (entry.State != EntityState.Deleted)
+                {
+                    Take(entry.CurrentValues[property]);
+                }
+            }
+
+            static bool Changed(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, params string[] properties) =>
+                entry.State is EntityState.Added or EntityState.Deleted
+                || entry.Properties.Any(p => p.IsModified && properties.Contains(p.Metadata.Name));
+
+            foreach (var entry in ChangeTracker.Entries())
+            {
+                if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                {
+                    continue;
+                }
+
+                switch (entry.Entity)
+                {
+                    case Operation:
+                        // Cerrar un lote al vender solo afecta desde la fecha de cierre
+                        var modified = entry.Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name).ToList();
+                        var onlyClosing = entry.State == EntityState.Modified
+                            && modified.All(n => n is nameof(Operation.CloseDate) or nameof(Operation.SaleHistoryId) or nameof(Operation.OriginOperationId));
+                        if (!onlyClosing)
+                        {
+                            TakeDates(entry, nameof(Operation.Date));
+                        }
+                        if (entry.State != EntityState.Added || entry.CurrentValues[nameof(Operation.CloseDate)] != null)
+                        {
+                            TakeDates(entry, nameof(Operation.CloseDate));
+                        }
+                        break;
+                    case SaleHistory:
+                        TakeDates(entry, nameof(SaleHistory.SaleDate));
+                        break;
+                    case BankOperation:
+                        TakeDates(entry, nameof(BankOperation.Date));
+                        break;
+                    case FundOperation:
+                        TakeDates(entry, nameof(FundOperation.Date));
+                        break;
+                    case FundValueHistory:
+                        TakeDates(entry, nameof(FundValueHistory.Date));
+                        break;
+                    case SafeHavenOperation:
+                        TakeDates(entry, nameof(SafeHavenOperation.Date));
+                        break;
+                    case PropertyOperation:
+                        TakeDates(entry, nameof(PropertyOperation.Date));
+                        break;
+                    case BankAccount when Changed(entry, nameof(BankAccount.OpeningBalance), nameof(BankAccount.Name)):
+                        Take(DateTime.MinValue);
+                        break;
+                    case Fund when Changed(entry, nameof(Fund.TotalInvested), nameof(Fund.Name)):
+                        TakeDates(entry, nameof(Fund.CreatedAt));
+                        break;
+                    case SafeHavenAsset when Changed(entry, nameof(SafeHavenAsset.CurrentValue), nameof(SafeHavenAsset.TotalInvested), nameof(SafeHavenAsset.Name)):
+                        TakeDates(entry, nameof(SafeHavenAsset.CreatedAt));
+                        break;
+                    case Property when Changed(entry, nameof(Property.PurchaseDate), nameof(Property.SaleDate), nameof(Property.CurrentValue),
+                                               nameof(Property.TotalInvested), nameof(Property.Status), nameof(Property.Name)):
+                        TakeDates(entry, nameof(Property.PurchaseDate));
+                        TakeDates(entry, nameof(Property.SaleDate));
+                        break;
+                    case CompanyDetail when entry.State == EntityState.Modified
+                                            && Changed(entry, nameof(CompanyDetail.CountryCode), nameof(CompanyDetail.Sector), nameof(CompanyDetail.Name)):
+                        Take(DateTime.MinValue);
+                        break;
+                    case AppSetting when (string?)entry.CurrentValues[nameof(AppSetting.Key)] == "BaseCountryCode":
+                        Take(DateTime.MinValue);
+                        break;
+                }
+            }
+
+            if (earliest == null)
+            {
+                return;
+            }
+
+            var mark = AppSettings.Local.FirstOrDefault(s => s.Key == DailySnapshotsDirtyKey)
+                       ?? AppSettings.FirstOrDefault(s => s.Key == DailySnapshotsDirtyKey);
+            if (mark == null)
+            {
+                AppSettings.Add(new AppSetting { Key = DailySnapshotsDirtyKey, TextValue = earliest.Value.ToString("yyyy-MM-dd"), UpdatedAt = DateTime.Now });
+                return;
+            }
+
+            if (!DateTime.TryParse(mark.TextValue, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var current)
+                || earliest.Value < current)
+            {
+                mark.TextValue = earliest.Value.ToString("yyyy-MM-dd");
+                mark.UpdatedAt = DateTime.Now;
+            }
+        }
+
+        /// <summary>
         /// Configuración del modelo de datos
         /// Establece índices, relaciones y constraints adicionales
         /// </summary>
@@ -1119,6 +1266,23 @@ namespace FINANCEAPP.Data
                 entity.HasIndex(e => new { e.CurrencyPairId, e.Date })
                     .IsUnique()
                     .HasDatabaseName("IX_CurrencyRatePoints_CurrencyPairId_Date");
+            });
+
+            // Capturas diarias de la cartera (SPEC-17-03): datos derivados, sin claves foráneas
+            modelBuilder.Entity<DailyPortfolioSnapshot>(entity =>
+            {
+                entity.ToTable("DailyPortfolioSnapshots");
+                entity.HasIndex(e => e.Date)
+                    .IsUnique()
+                    .HasDatabaseName("IX_DailyPortfolioSnapshots_Date");
+            });
+
+            modelBuilder.Entity<DailyCompanySnapshot>(entity =>
+            {
+                entity.ToTable("DailyCompanySnapshots");
+                entity.HasIndex(e => new { e.Date, e.CompanyId })
+                    .IsUnique()
+                    .HasDatabaseName("IX_DailyCompanySnapshots_Date_CompanyId");
             });
         }
     }

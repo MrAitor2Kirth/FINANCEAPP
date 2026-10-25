@@ -1,5 +1,6 @@
 @page "/history"
 @inject IWealthSnapshotService WealthSnapshotService
+@inject IDailySnapshotService DailySnapshotService
 
 <PageTitle>Histórico</PageTitle>
 
@@ -58,6 +59,58 @@
             <span class="history-card-meta"><span class="badge bg-secondary">Próximamente</span></span>
         </div>
     </div>
+
+    @* Capturas diarias y JSON para la IA local (SPEC-17-03) *@
+    <section class="card mt-4" aria-labelledby="daily-title">
+        <div class="card-body">
+            <h2 class="h5" id="daily-title"><i class="bi bi-robot me-2" aria-hidden="true"></i>Capturas diarias e IA local</h2>
+            <p class="text-muted small">Cada día la app guarda una foto calculada de tu cartera y deja al día un fichero JSON para tu IA local. Se rehace sola al abrir la app y al cambiar operaciones antiguas. El fichero no sale de tu equipo.</p>
+            @if (dailyStatus == null)
+            {
+                <p class="small text-muted mb-2">Cargando…</p>
+            }
+            else
+            {
+                <dl class="row small mb-2">
+                    <dt class="col-sm-4">Serie</dt>
+                    <dd class="col-sm-8">@(dailyStatus.Days == 0 ? "Sin capturas todavía" : $"{dailyStatus.Days} días, del {dailyStatus.FirstDate:dd/MM/yyyy} al {dailyStatus.LastDate:dd/MM/yyyy}")</dd>
+                    <dt class="col-sm-4">Reconstruidos · aproximados</dt>
+                    <dd class="col-sm-8">@dailyStatus.ReconstructedDays · @dailyStatus.ApproximateDays días</dd>
+                    @if (dailyStatus.DirtyFrom.HasValue)
+                    {
+                        <dt class="col-sm-4">Pendiente</dt>
+                        <dd class="col-sm-8">Recalcular desde el @(dailyStatus.DirtyFrom.Value == DateTime.MinValue ? "principio" : dailyStatus.DirtyFrom.Value.ToString("dd/MM/yyyy"))</dd>
+                    }
+                    <dt class="col-sm-4">Fichero</dt>
+                    <dd class="col-sm-8 text-break"><code>@dailyStatus.JsonPath</code>@(dailyStatus.JsonWrittenAt.HasValue ? $" · {dailyStatus.JsonWrittenAt:dd/MM/yyyy HH:mm}" : " · aún no escrito")</dd>
+                </dl>
+                @if (!string.IsNullOrEmpty(dailyStatus.JsonError))
+                {
+                    <div class="alert alert-warning py-1 px-2 small">@dailyStatus.JsonError</div>
+                }
+            }
+            @if (!string.IsNullOrEmpty(dailyMessage))
+            {
+                <div class="alert alert-info py-1 px-2 small">@dailyMessage</div>
+            }
+            <div class="d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-primary btn-sm" @onclick="ExportForAi" disabled="@isDailyBusy">
+                    <i class="bi bi-filetype-json me-1" aria-hidden="true"></i>Exportar para IA
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenFolder" disabled="@isDailyBusy">
+                    <i class="bi bi-folder2-open me-1" aria-hidden="true"></i>Abrir carpeta
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CompleteHistories" disabled="@isDailyBusy" title="Descarga las cotizaciones y los tipos de cambio que falten y rehace toda la serie">
+                    <i class="bi bi-cloud-download me-1" aria-hidden="true"></i>Completar históricos
+                </button>
+                @if (isDailyBusy)
+                {
+                    <span class="spinner-border spinner-border-sm text-secondary align-self-center" role="status"></span>
+                }
+            </div>
+            <p class="small text-muted mt-2 mb-0">La carpeta, el tamaño de la serie y los límites de las alertas se cambian en <a href="/settings">Configuración</a>. Para un modelo pequeño (por ejemplo Qwen3 4B), sube su contexto a 16.384 tokens.</p>
+        </div>
+    </section>
 </div>
 
 <WealthCaptureModal @ref="captureModal" OnCaptured="OnCaptured" />
@@ -68,9 +121,76 @@
     private bool isLoading = true;
     private string? successMessage;
 
+    // Capturas diarias e IA local (SPEC-17-03)
+    private DailySnapshotStatus? dailyStatus;
+    private bool isDailyBusy;
+    private string? dailyMessage;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadLatestAsync();
+        dailyStatus = await DailySnapshotService.GetStatusAsync();
+    }
+
+    private async Task ExportForAi()
+    {
+        await RunDailyAsync(async () =>
+        {
+            var result = await DailySnapshotService.RefreshAsync();
+            dailyMessage = result.JsonError ?? $"JSON actualizado ({result.Days} días recalculados).";
+            if (result.JsonError == null)
+            {
+                await OpenFolder();
+            }
+        });
+    }
+
+    private async Task CompleteHistories()
+    {
+        await RunDailyAsync(async () =>
+        {
+            var series = await DailySnapshotService.CompleteHistoriesAsync();
+            dailyMessage = $"Históricos revisados ({series} series) y serie diaria rehecha.";
+        });
+    }
+
+    private async Task RunDailyAsync(Func<Task> action)
+    {
+        isDailyBusy = true;
+        dailyMessage = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            dailyMessage = $"No se pudo completar: {ex.Message}";
+        }
+        finally
+        {
+            dailyStatus = await DailySnapshotService.GetStatusAsync();
+            isDailyBusy = false;
+        }
+    }
+
+    // Abre la carpeta del JSON con el explorador; si no se puede, muestra la ruta
+    private async Task OpenFolder()
+    {
+        var folder = dailyStatus != null ? Path.GetDirectoryName(dailyStatus.JsonPath) : null;
+        if (string.IsNullOrEmpty(folder))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(folder);
+            await Launcher.Default.OpenAsync(new Uri(folder));
+        }
+        catch
+        {
+            dailyMessage = $"Abre la carpeta a mano: {folder}";
+        }
     }
 
     private async Task LoadLatestAsync()

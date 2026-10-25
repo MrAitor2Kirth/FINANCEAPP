@@ -4,6 +4,7 @@
 @inject IExchangeRateService ExchangeRateService
 @inject IPortfolioPeriodService PortfolioPeriodService
 @inject IAppSettingsService AppSettingsService
+@inject IDailySnapshotService DailySnapshotService
 @using System.Globalization
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
@@ -296,7 +297,7 @@
                                     <td>
                                         @if (isExtended)
                                         {
-                                            <strong>@company.Name</strong>
+                                            <button type="button" class="btn btn-link btn-sm p-0 me-1 breakdown-toggle" @onclick="() => ToggleBreakdown(company)" aria-expanded="@(expandedCompanyId == company.Id ? "true" : "false")" title="Ver de dónde sale su cifra" aria-label="Desglose de @company.Name"><i class="bi @(expandedCompanyId == company.Id ? "bi-caret-down-fill" : "bi-caret-right-fill")" aria-hidden="true"></i></button><strong class="breakdown-name" @onclick="() => ToggleBreakdown(company)">@company.Name</strong>
                                             <div class="mt-1 d-flex flex-wrap gap-1">
                                                 <span class="badge bg-primary">@company.Ticker</span>
                                                 <span class="badge @GetSectorBadgeClass(company.Sector)">@company.Sector</span>
@@ -309,7 +310,7 @@
                                         else
                                         {
                                             <div class="d-flex align-items-center gap-2">
-                                                <strong>@company.Name</strong>
+                                                <button type="button" class="btn btn-link btn-sm p-0 me-1 breakdown-toggle" @onclick="() => ToggleBreakdown(company)" aria-expanded="@(expandedCompanyId == company.Id ? "true" : "false")" title="Ver de dónde sale su cifra" aria-label="Desglose de @company.Name"><i class="bi @(expandedCompanyId == company.Id ? "bi-caret-down-fill" : "bi-caret-right-fill")" aria-hidden="true"></i></button><strong class="breakdown-name" @onclick="() => ToggleBreakdown(company)">@company.Name</strong>
                                                 <span class="badge bg-primary">@company.Ticker</span>
                                                 <span class="badge @GetSectorBadgeClass(company.Sector)">@company.Sector</span>
                                                 @if (sold != null)
@@ -480,6 +481,94 @@
                                         </div>
                                     </td>
                                 </tr>
+                                @if (expandedCompanyId == company.Id)
+                                {
+                                    @* Desglose de la empresa (SPEC-01-12): de dónde sale la cifra de la fila *@
+                                    <tr class="breakdown-row">
+                                        <td colspan="6">
+                                            @if (isLoadingBreakdown)
+                                            {
+                                                <span class="spinner-border spinner-border-sm text-secondary" role="status"></span>
+                                                <span class="small text-muted ms-1">Calculando el desglose...</span>
+                                            }
+                                            else if (!string.IsNullOrEmpty(breakdownError))
+                                            {
+                                                <div class="alert alert-warning py-1 px-2 small mb-0">@breakdownError</div>
+                                            }
+                                            else if (breakdown != null)
+                                            {
+                                                @if (breakdown.Lines.Count == 0)
+                                                {
+                                                    <p class="small text-muted mb-2">Sin operaciones en esta vista.</p>
+                                                }
+                                                else
+                                                {
+                                                    <table class="table table-sm mb-2 breakdown-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th scope="col">Fecha</th>
+                                                                <th scope="col">Tipo</th>
+                                                                <th scope="col" class="text-end">Acciones</th>
+                                                                <th scope="col" class="text-end">Precio</th>
+                                                                <th scope="col" class="text-end">Coste</th>
+                                                                <th scope="col" class="text-end">Valor</th>
+                                                                <th scope="col" class="text-end">Resultado</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            @foreach (var line in breakdown.Lines)
+                                                            {
+                                                                <tr class="@(line.Kind == BreakdownLineKind.Sale ? "breakdown-sale" : line.Kind == BreakdownLineKind.Dividend ? "breakdown-dividend" : null)">
+                                                                    <td>@line.Date.ToString("dd/MM/yyyy")</td>
+                                                                    <td>@line.Label</td>
+                                                                    <td class="text-end">@(line.Shares.HasValue ? ShareQuantity.Format(line.Shares.Value) : "—")</td>
+                                                                    <td class="text-end">@(line.Price.HasValue ? CurrencyFormatter.Format(line.Price.Value, breakdown.CurrencyCode) : "—")</td>
+                                                                    <td class="text-end">@(line.Kind == BreakdownLineKind.Dividend ? "—" : CurrencyFormatter.Format(line.Cost, breakdown.CurrencyCode))</td>
+                                                                    <td class="text-end">@(line.Value.HasValue ? CurrencyFormatter.Format(line.Value.Value, breakdown.CurrencyCode) : "—")</td>
+                                                                    <td class="text-end" style="color:@SignSwatch(line.Result)">
+                                                                        @(line.Result >= 0 ? "+" : "")@CurrencyFormatter.Format(line.Result, breakdown.CurrencyCode)
+                                                                        @if (line.ResultPercent.HasValue)
+                                                                        {
+                                                                            <span class="small"> (@line.ResultPercent.Value.ToString("N2")%)</span>
+                                                                        }
+                                                                    </td>
+                                                                </tr>
+                                                            }
+                                                        </tbody>
+                                                        <tfoot>
+                                                            <tr>
+                                                                <th scope="row" colspan="4">Total</th>
+                                                                <th class="text-end">@CurrencyFormatter.Format(breakdown.Invested, breakdown.CurrencyCode)</th>
+                                                                <th class="text-end">@CurrencyFormatter.Format(breakdown.Value, breakdown.CurrencyCode)</th>
+                                                                <th class="text-end" style="color:@SignSwatch(breakdown.Result)">
+                                                                    @(breakdown.Result >= 0 ? "+" : "")@CurrencyFormatter.Format(breakdown.Result, breakdown.CurrencyCode)
+                                                                    @if (breakdown.ReturnPercent.HasValue)
+                                                                    {
+                                                                        <span class="small"> (@breakdown.ReturnPercent.Value.ToString("N2")%)</span>
+                                                                    }
+                                                                </th>
+                                                            </tr>
+                                                            @if (breakdown.ShowReturnWithDividends && breakdown.Dividends != 0 && breakdown.ReturnWithDividendsPercent.HasValue)
+                                                            {
+                                                                <tr>
+                                                                    <td colspan="6" class="text-end small text-muted">Con @CurrencyFormatter.Format(breakdown.Dividends, breakdown.CurrencyCode) en dividendos</td>
+                                                                    <td class="text-end small" style="color:@SignSwatch(breakdown.ReturnWithDividendsPercent)">@breakdown.ReturnWithDividendsPercent.Value.ToString("N2")%</td>
+                                                                </tr>
+                                                            }
+                                                        </tfoot>
+                                                    </table>
+                                                }
+                                                @foreach (var warning in breakdown.Warnings.Distinct())
+                                                {
+                                                    <p class="small text-muted mb-1"><i class="bi bi-info-circle me-1"></i>@warning</p>
+                                                }
+                                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenOperations(company)">
+                                                    <i class="bi bi-list-ul me-1" aria-hidden="true"></i>Ver en operaciones
+                                                </button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
                             }
                         </tbody>
                     </table>
@@ -610,18 +699,85 @@
     private ConvertedCompanyTotals investedTotals = new();
     private Dictionary<int, decimal> weights = new();
     private List<CompanyDetail> visibleCompanies => isExtended
-        ? (includeSold && soldRows != null ? soldRows.ExtendedRows : companies ?? new())
+        ? (includeSold && soldRowsExtended != null ? soldRowsExtended.ExtendedRows : companies ?? new())
         : ShortRows;
 
     // Incluir lo vendido de la vista (SPEC-01-11): se recuerda en AppSettings
     private bool includeSold;
     private SoldSummary? soldSummary;
     private SoldRows? soldRows;
+    // Lista extendible: siempre las cifras de hoy, también lo vendido (SPEC-01-12, decisión 5)
+    private SoldRows? soldRowsExtended;
     private ConvertedCompanyTotals? soldTotals;
     private List<CompanyDetail> OpenShortRows => periodSummary?.Companies ?? investedCompanies;
     private List<CompanyDetail> ShortRows => includeSold && soldRows != null ? soldRows.ShortRows : OpenShortRows;
     private SoldCompany? SoldInfo(CompanyDetail company) =>
-        includeSold && soldRows != null && soldRows.Info.TryGetValue(company.Id, out var info) ? info : null;
+        includeSold && (isExtended ? soldRowsExtended : soldRows) is { } rows && rows.Info.TryGetValue(company.Id, out var info) ? info : null;
+
+    // Desglose por empresa (SPEC-01-12): una empresa abierta a la vez
+    private int? expandedCompanyId;
+    private CompanyBreakdown? breakdown;
+    private bool isLoadingBreakdown;
+    private string? breakdownError;
+
+    private async Task ToggleBreakdown(CompanyDetail company)
+    {
+        if (expandedCompanyId == company.Id)
+        {
+            CloseBreakdown();
+            return;
+        }
+
+        expandedCompanyId = company.Id;
+        await LoadBreakdownAsync();
+    }
+
+    private void CloseBreakdown()
+    {
+        expandedCompanyId = null;
+        breakdown = null;
+        breakdownError = null;
+    }
+
+    /// <summary>
+    /// Recalcula el desglose abierto con la vista actual; la lista extendible usa siempre las cifras de hoy.
+    /// Si la empresa ya no está en la lista, lo cierra.
+    /// </summary>
+    private async Task LoadBreakdownAsync()
+    {
+        if (expandedCompanyId is not int id)
+        {
+            return;
+        }
+
+        var company = companies?.FirstOrDefault(c => c.Id == id);
+        if (company == null || !visibleCompanies.Any(c => c.Id == id))
+        {
+            CloseBreakdown();
+            return;
+        }
+
+        isLoadingBreakdown = true;
+        breakdownError = null;
+        try
+        {
+            breakdown = isExtended
+                ? await PortfolioPeriodService.GetBreakdownAsync(company.Name, SalesPeriodFilter.All, PeriodSummaryView.Purchases, includeSold)
+                : await PortfolioPeriodService.GetBreakdownAsync(company.Name, periodFilter, periodView, includeSold);
+        }
+        catch (Exception ex)
+        {
+            breakdown = null;
+            breakdownError = $"No se pudo calcular el desglose: {ex.Message}";
+        }
+        finally
+        {
+            isLoadingBreakdown = false;
+        }
+    }
+
+    private void OpenOperations(CompanyDetail company) =>
+        Navigation.NavigateTo($"/operations?company={Uri.EscapeDataString(company.Name)}");
 
     // Las filas del periodo son copias: las acciones de fila actúan sobre la empresa real (SPEC-01-10, RF-4)
     private CompanyDetail RealCompany(CompanyDetail company) => companies?.FirstOrDefault(c => c.Id == company.Id) ?? company;
@@ -748,6 +904,7 @@
         {
             periodSummary = null;
             await RefreshSoldSafeAsync();
+            await LoadBreakdownAsync();
             return;
         }
 
@@ -765,6 +922,7 @@
             {
                 periodSummary = summary;
                 await RefreshSoldAsync(cts.Token);
+                await LoadBreakdownAsync();
             }
         }
         catch (OperationCanceledException)
@@ -800,6 +958,7 @@
         try
         {
             await RefreshSoldSafeAsync();
+            await LoadBreakdownAsync();
         }
         finally
         {
@@ -816,6 +975,7 @@
         {
             soldSummary = null;
             soldRows = null;
+            soldRowsExtended = null;
             soldTotals = null;
             return;
         }
@@ -824,6 +984,10 @@
         soldSummary = summary;
         soldTotals = SoldPositionsSummary.Combine(periodSummary?.Totals ?? investedTotals, summary);
         soldRows = SoldPositionsSummary.BuildRows(OpenShortRows, companies, summary);
+        soldRowsExtended = periodFilter.Mode == SalesPeriodMode.All
+            ? soldRows
+            : SoldPositionsSummary.BuildRows(investedCompanies, companies,
+                await PortfolioPeriodService.GetSoldAsync(SalesPeriodFilter.All, PeriodSummaryView.Purchases, cancellationToken));
     }
 
     private async Task RefreshSoldSafeAsync()
@@ -836,6 +1000,7 @@
         {
             soldSummary = null;
             soldRows = null;
+            soldRowsExtended = null;
             soldTotals = null;
             periodError = $"No se pudo calcular lo vendido: {ex.Message}";
         }
@@ -866,7 +1031,11 @@
     // Solo vive mientras la pagina esta abierta y afecta a todas las filas a la vez.
     private bool isExtended = false;
 
-    private void ToggleExtended() => isExtended = !isExtended;
+    private async Task ToggleExtended()
+    {
+        isExtended = !isExtended;
+        await LoadBreakdownAsync();
+    }
 
     /// <summary>
     /// Método que se ejecuta cuando el componente se inicializa
@@ -889,6 +1058,8 @@
             isRefreshingLivePrices = true;
             await CompanyService.RefreshAllLivePricesAsync();
             await LoadCompanies();
+            // El registro de hoy y el JSON para la IA con los precios nuevos (SPEC-17-03, RF-5)
+            await DailySnapshotService.RefreshAsync();
         }
         catch (Exception ex)
         {
@@ -933,6 +1104,7 @@
             investedTotals = await ExchangeRateService.GetConvertedTotalsAsync(investedCompanies);
             weights = InvestedCompaniesSummary.GetWeights(investedTotals);
             await RefreshSoldSafeAsync();
+            await LoadBreakdownAsync();
         }
         catch (Exception ex)
         {

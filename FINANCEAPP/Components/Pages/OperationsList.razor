@@ -651,9 +651,17 @@
 
     private void CloseDetails() => exchangeDetails = null;
 
+    // Filtro de empresa desde la URL (SPEC-01-12: «Ver en operaciones» de /companies)
+    [SupplyParameterFromQuery(Name = "company")]
+    public string? CompanyQuery { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         await LoadOperations();
+        if (!string.IsNullOrWhiteSpace(CompanyQuery) && companies != null && companies.Any(c => c.Name == CompanyQuery))
+        {
+            ApplyCompanyFilter(CompanyQuery);
+        }
     }
 
     private async Task LoadOperations()

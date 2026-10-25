@@ -82,6 +82,51 @@ namespace FINANCEAPP.Services
         /// Guarda la elección «Cartera actual / Incluir vendidas» de /companies (SPEC-01-11)
         /// </summary>
         Task<AppSettingResult> SaveCompaniesIncludeSoldAsync(bool includeSold);
+
+        /// <summary>
+        /// Ajustes del JSON para la IA local y de las alertas (SPEC-17-03). Sin ajuste guardado, los valores por defecto.
+        /// </summary>
+        Task<AiExportSettings> GetAiExportSettingsAsync();
+
+        /// <summary>
+        /// Guarda los ajustes del JSON para la IA local y de las alertas (claves AiExport.* y Alerts.*), validados
+        /// </summary>
+        Task<AppSettingResult> SaveAiExportSettingsAsync(AiExportSettings settings);
+    }
+
+    /// <summary>
+    /// Ajustes del JSON para la IA local y límites de las alertas (SPEC-17-03, RF-6 y RF-7)
+    /// </summary>
+    public class AiExportSettings
+    {
+        /// <summary>Carpeta del JSON; vacía = Documentos\FINANCEAPP\IA</summary>
+        public string Folder { get; set; } = string.Empty;
+
+        /// <summary>Días de la serie con todas las columnas</summary>
+        public int FullDays { get; set; } = 30;
+
+        /// <summary>Días de la serie compacta (4 columnas), contando los de la serie completa</summary>
+        public int CompactDays { get; set; } = 365;
+
+        public decimal MaxCompanyPct { get; set; } = 15m;
+        public decimal MaxSectorPct { get; set; } = 35m;
+        public decimal MaxForeignPct { get; set; } = 40m;
+
+        /// <summary>Caída máxima de una empresa en 7 días (negativa)</summary>
+        public decimal MaxDrop7dPct { get; set; } = -8m;
+
+        public decimal MinLiquidityPct { get; set; } = 5m;
+        public int StalePriceDays { get; set; } = 3;
+
+        /// <summary>Carpeta por defecto: Documentos\FINANCEAPP\IA</summary>
+        public static string DefaultFolder =>
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FINANCEAPP", "IA");
+
+        /// <summary>Carpeta que se usa: la elegida o la de por defecto</summary>
+        public string EffectiveFolder => string.IsNullOrWhiteSpace(Folder) ? DefaultFolder : Folder.Trim();
+
+        /// <summary>Ruta completa del JSON</summary>
+        public string FilePath => Path.Combine(EffectiveFolder, "cartera-ia.json");
     }
 
     /// <summary>

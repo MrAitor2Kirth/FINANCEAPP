@@ -697,6 +697,15 @@ button.chart-legend-item:hover { border-color: var(--line); }
 .companies-table tr.row-sold > * { background-color: var(--paper-2); color: var(--ink-soft); }
 .companies-table .badge-sold { background-color: var(--ink-soft); color: #fff; }
 .companies-table .badge-partial { background-color: transparent; color: var(--ink-soft); border: 1px solid var(--ink-soft); }
+/* SPEC-01-12: desglose de una empresa bajo su fila */
+.companies-table .breakdown-toggle { color: var(--ink-soft); text-decoration: none; line-height: 1; }
+.companies-table .breakdown-name { cursor: pointer; }
+.companies-table tr.breakdown-row > td { background-color: var(--paper); padding: 0.5rem 0.75rem 0.75rem 2rem; white-space: normal; }
+.companies-table .breakdown-table { background-color: var(--surface); font-size: 0.8rem; }
+.companies-table .breakdown-table th { color: var(--ink-soft); font-weight: 600; }
+.companies-table .breakdown-table tfoot th { border-top: 2px solid var(--line); color: var(--ink); }
+.companies-table .breakdown-table tr.breakdown-sale > td { background-color: var(--paper-2); }
+.companies-table .breakdown-table tr.breakdown-dividend > td { color: var(--teal-ink); }
 
 
 /* ==========================================================================

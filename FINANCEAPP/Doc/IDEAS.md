@@ -504,6 +504,10 @@ Observaciones (25/10/2026, opinión del asistente): la skill `/app-map` dibuja e
 
 #### Tareas anotadas para el mapa
 - Ver el informe fiscal — `/history/tax-report` (SPEC-17-02).
+- Ver de dónde sale la rentabilidad de una empresa — `/companies`, flecha de la fila (SPEC-01-12).
+- Ver las operaciones de una empresa — `/operations?company=<nombre>` (SPEC-01-12).
+- Exportar la cartera para la IA local — `/history`, «Exportar para IA» (SPEC-17-03).
+- Ajustar la IA local y las alertas — `/settings`, «IA local» (SPEC-17-03).
 
 ### Bitácora
 - 2026-10-25: idea creada.

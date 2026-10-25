@@ -652,6 +652,96 @@ namespace FINANCEAPP.Data
         }
 
         /// <summary>
+        /// Crea las tablas de las capturas diarias de la cartera (SPEC-17-03): DailyPortfolioSnapshots (una fila por día)
+        /// y DailyCompanySnapshots (una fila por empresa y día), con sus índices únicos si no existen. Son datos derivados
+        /// que se pueden regenerar; sin claves foráneas. No toca ninguna otra tabla ni dato.
+        /// </summary>
+        public static void EnsureDailySnapshotTables(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var create = connection.CreateCommand();
+                create.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""DailyPortfolioSnapshots"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_DailyPortfolioSnapshots"" PRIMARY KEY AUTOINCREMENT,
+                        ""Date"" TEXT NOT NULL,
+                        ""CurrencyCode"" TEXT NOT NULL DEFAULT 'EUR',
+                        ""CalculatedAt"" TEXT NOT NULL,
+                        ""IsReconstructed"" INTEGER NOT NULL DEFAULT 0,
+                        ""IsApproximate"" INTEGER NOT NULL DEFAULT 0,
+                        ""ApproximateNote"" TEXT NULL,
+                        ""TotalValue"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""TotalInvested"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""StocksValue"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""StocksInvested"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""FundsValue"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""FundsInvested"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""SafeHavenValue"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""SafeHavenInvested"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""RealEstateValue"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""RealEstateInvested"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""BankBalance"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""LiquidityPct"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""OpenInvested"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""OpenValue"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""OpenDividends"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""OpenReturnPct"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""OpenReturnWithDivPct"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""DayBought"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""DayBuyCount"" INTEGER NOT NULL DEFAULT 0,
+                        ""AllInvested"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""AllValue"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""AllDividends"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""AllReturnPct"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""AllReturnWithDivPct"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""SoldCost"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""SoldProceeds"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""SoldResult"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""SoldReturnPct"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""DaySoldNet"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""DayNetContribution"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""DayDividends"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""DayCommissions"" decimal(18,2) NOT NULL DEFAULT 0
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_DailyPortfolioSnapshots_Date"" ON ""DailyPortfolioSnapshots"" (""Date"");
+                    CREATE TABLE IF NOT EXISTS ""DailyCompanySnapshots"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_DailyCompanySnapshots"" PRIMARY KEY AUTOINCREMENT,
+                        ""Date"" TEXT NOT NULL,
+                        ""CompanyId"" INTEGER NOT NULL,
+                        ""CompanyName"" TEXT NOT NULL DEFAULT '',
+                        ""Ticker"" TEXT NOT NULL DEFAULT '',
+                        ""Sector"" TEXT NOT NULL DEFAULT '',
+                        ""CurrencyCode"" TEXT NOT NULL DEFAULT 'EUR',
+                        ""Shares"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""Price"" decimal(18,4) NOT NULL DEFAULT 0,
+                        ""CostBase"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""ValueBase"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""DividendsBase"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""ReturnPct"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""WeightPct"" decimal(18,2) NOT NULL DEFAULT 0
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_DailyCompanySnapshots_Date_CompanyId"" ON ""DailyCompanySnapshots"" (""Date"", ""CompanyId"");
+                ";
+                create.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
         /// Crea las tablas CurrencyPairs y CurrencyRatePoints (histórico diario de tipos de cambio, SPEC-01-09) y sus
         /// índices únicos si no existen. Sin claves foráneas. No toca ninguna otra tabla ni dato.
         /// </summary>

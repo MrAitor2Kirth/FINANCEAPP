@@ -26,6 +26,74 @@ namespace FINANCEAPP.Services
         /// Coste, cobrado neto y dividendos de las vendidas se convierten con los tipos guardados (SPEC-02-05).
         /// </summary>
         Task<SoldSummary> GetSoldAsync(SalesPeriodFilter filter, PeriodSummaryView view, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Desglose de una empresa en la vista (SPEC-01-12): lotes abiertos, ventas antiguas, ventas (con «Incluir vendidas»)
+        /// y dividendos, en la divisa de la empresa, con un total que coincide con su fila del listado. Null si no existe.
+        /// </summary>
+        Task<CompanyBreakdown?> GetBreakdownAsync(string companyName, SalesPeriodFilter filter, PeriodSummaryView view, bool includeSold, CancellationToken cancellationToken = default);
+    }
+
+    /// <summary>
+    /// Tipo de línea del desglose de una empresa (SPEC-01-12)
+    /// </summary>
+    public enum BreakdownLineKind
+    {
+        OpenLot,
+        OldSale,
+        Sale,
+        Dividend
+    }
+
+    /// <summary>
+    /// Una línea del desglose de una empresa, en la divisa de la empresa (SPEC-01-12)
+    /// </summary>
+    public class BreakdownLine
+    {
+        public BreakdownLineKind Kind { get; set; }
+        public DateTime Date { get; set; }
+
+        /// <summary>Texto del tipo: «Compra», «Traspaso», «Venta», «Venta antigua» o «Dividendo»</summary>
+        public string Label { get; set; } = string.Empty;
+
+        /// <summary>Acciones (negativas en ventas); null en dividendos</summary>
+        public decimal? Shares { get; set; }
+
+        /// <summary>Precio por acción de la operación; null si no lo tiene</summary>
+        public decimal? Price { get; set; }
+
+        /// <summary>Coste: importe con comisión (negativo en una venta antigua; 0 en dividendos)</summary>
+        public decimal Cost { get; set; }
+
+        /// <summary>Lote: acciones × precio de la vista; venta: cobrado neto; null en dividendos</summary>
+        public decimal? Value { get; set; }
+
+        /// <summary>Resultado: valor − coste; en dividendos, su importe</summary>
+        public decimal Result { get; set; }
+
+        /// <summary>Resultado ÷ coste × 100; null sin coste</summary>
+        public decimal? ResultPercent { get; set; }
+    }
+
+    /// <summary>
+    /// Desglose de una empresa en la vista (SPEC-01-12). Los totales coinciden con la fila del listado.
+    /// </summary>
+    public class CompanyBreakdown
+    {
+        public string CompanyName { get; set; } = string.Empty;
+        public string CurrencyCode { get; set; } = CurrencyFormatter.DefaultCurrency;
+        public List<BreakdownLine> Lines { get; set; } = new();
+        public decimal Invested { get; set; }
+        public decimal Value { get; set; }
+        public decimal Dividends { get; set; }
+        public decimal Result => Value - Invested;
+        public decimal? ReturnPercent { get; set; }
+        public decimal? ReturnWithDividendsPercent { get; set; }
+
+        /// <summary>false en «Compras del periodo», como la fila (SPEC-01-09)</summary>
+        public bool ShowReturnWithDividends { get; set; } = true;
+
+        public List<string> Warnings { get; set; } = new();
     }
 
     /// <summary>
