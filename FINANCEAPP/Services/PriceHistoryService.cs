@@ -37,6 +37,7 @@ namespace FINANCEAPP.Services
         // Claves de AppSettings que marcan el histórico diario de una empresa o de un índice como completo (RF-2)
         private const string CompleteKeyPrefix = "PriceHistory.Complete.";
         private const string BenchmarkCompleteKeyPrefix = "BenchmarkHistory.Complete.";
+        private const string CurrencyCompleteKeyPrefix = "CurrencyHistory.Complete.";
 
         private readonly AppDbContext _context;
         private readonly IStockPriceService _stockPriceService;
@@ -62,9 +63,17 @@ namespace FINANCEAPP.Services
         /// </summary>
         public static string GetBenchmarkCompleteKey(int benchmarkIndexId) => BenchmarkCompleteKeyPrefix + benchmarkIndexId;
 
-        private static string GetCompleteKey(ChartSeriesRef series) => series.Kind == ChartSeriesKind.Benchmark
-            ? GetBenchmarkCompleteKey(series.Id)
-            : GetCompleteKey(series.Id);
+        /// <summary>
+        /// Clave de AppSettings que indica que el histórico diario del par de divisas está completo (SPEC-01-09)
+        /// </summary>
+        public static string GetCurrencyCompleteKey(int currencyPairId) => CurrencyCompleteKeyPrefix + currencyPairId;
+
+        private static string GetCompleteKey(ChartSeriesRef series) => series.Kind switch
+        {
+            ChartSeriesKind.Benchmark => GetBenchmarkCompleteKey(series.Id),
+            ChartSeriesKind.Currency => GetCurrencyCompleteKey(series.Id),
+            _ => GetCompleteKey(series.Id)
+        };
 
         public async Task<List<PriceHistoryPoint>> GetHistoryAsync(int companyId, string ticker, ChartGranularity granularity)
         {
@@ -279,6 +288,73 @@ namespace FINANCEAPP.Services
                 .AnyAsync(s => s.Key == key && s.TextValue == "true");
         }
 
+        // ---------------------------------------------------------------- Histórico hasta una fecha (SPEC-01-09)
+
+        public async Task<bool> EnsureDailyCoverageAsync(ChartSeriesRef series, DateTime date, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(series.Symbol))
+            {
+                return false;
+            }
+
+            // Bloque reciente o días nuevos, como al abrir el gráfico
+            await RefreshCacheIfNeededAsync(series, false);
+
+            var target = date.Date;
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var oldest = await GetOldestDateAsync(series);
+                if (oldest == null)
+                {
+                    return false;
+                }
+
+                if (oldest.Value.Date <= target || await IsCompleteAsync(series))
+                {
+                    return true;
+                }
+
+                var block = await FetchOlderDailyBlockAsync(series.Symbol, oldest.Value, cancellationToken);
+                if (block.Failed)
+                {
+                    return false;
+                }
+
+                await SaveSeriesDailyBlockAsync(series, block);
+                if (block.ReachedStart && block.Bars.Count == 0)
+                {
+                    return true;
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return false;
+        }
+
+        public async Task<decimal?> GetDailyCloseAtAsync(ChartSeriesRef series, DateTime date)
+        {
+            // Hasta el final de ese día (los puntos diarios se guardan sin hora)
+            var limit = date.Date.AddDays(1);
+            return series.Kind switch
+            {
+                ChartSeriesKind.Currency => await _context.CurrencyRatePoints.AsNoTracking()
+                    .Where(p => p.CurrencyPairId == series.Id && p.Date < limit)
+                    .OrderByDescending(p => p.Date)
+                    .Select(p => (decimal?)p.Close)
+                    .FirstOrDefaultAsync(),
+                ChartSeriesKind.Benchmark => await _context.BenchmarkPricePoints.AsNoTracking()
+                    .Where(p => p.BenchmarkIndexId == series.Id && p.Date < limit)
+                    .OrderByDescending(p => p.Date)
+                    .Select(p => (decimal?)p.Close)
+                    .FirstOrDefaultAsync(),
+                _ => await _context.PriceHistoryPoints.AsNoTracking()
+                    .Where(p => p.CompanyId == series.Id && p.Date < limit)
+                    .OrderByDescending(p => p.Date)
+                    .Select(p => (decimal?)p.Close)
+                    .FirstOrDefaultAsync(),
+            };
+        }
+
         // ---------------------------------------------------------------- Almacén por tipo de serie (SPEC-05-04)
 
         /// <summary>
@@ -286,6 +362,17 @@ namespace FINANCEAPP.Services
         /// </summary>
         private async Task<(DateTime Date, DateTime FetchedAt)?> GetLatestAsync(ChartSeriesRef series)
         {
+            if (series.Kind == ChartSeriesKind.Currency)
+            {
+                var currencyLatest = await _context.CurrencyRatePoints
+                    .AsNoTracking()
+                    .Where(p => p.CurrencyPairId == series.Id)
+                    .OrderByDescending(p => p.Date)
+                    .Select(p => new { p.Date, p.FetchedAt })
+                    .FirstOrDefaultAsync();
+                return currencyLatest == null ? null : (currencyLatest.Date, currencyLatest.FetchedAt);
+            }
+
             if (series.Kind == ChartSeriesKind.Benchmark)
             {
                 var latest = await _context.BenchmarkPricePoints
@@ -308,6 +395,16 @@ namespace FINANCEAPP.Services
 
         private async Task<DateTime?> GetOldestDateAsync(ChartSeriesRef series)
         {
+            if (series.Kind == ChartSeriesKind.Currency)
+            {
+                return await _context.CurrencyRatePoints
+                    .AsNoTracking()
+                    .Where(p => p.CurrencyPairId == series.Id)
+                    .OrderBy(p => p.Date)
+                    .Select(p => (DateTime?)p.Date)
+                    .FirstOrDefaultAsync();
+            }
+
             if (series.Kind == ChartSeriesKind.Benchmark)
             {
                 return await _context.BenchmarkPricePoints
@@ -332,6 +429,26 @@ namespace FINANCEAPP.Services
         /// </summary>
         private async Task<List<PriceHistoryPoint>> LoadDailyPointsAsync(ChartSeriesRef series)
         {
+            if (series.Kind == ChartSeriesKind.Currency)
+            {
+                return await _context.CurrencyRatePoints
+                    .AsNoTracking()
+                    .Where(p => p.CurrencyPairId == series.Id)
+                    .OrderBy(p => p.Date)
+                    .Select(p => new PriceHistoryPoint
+                    {
+                        Id = p.Id,
+                        Date = p.Date,
+                        Open = p.Open,
+                        High = p.High,
+                        Low = p.Low,
+                        Close = p.Close,
+                        Volume = p.Volume,
+                        FetchedAt = p.FetchedAt
+                    })
+                    .ToListAsync();
+            }
+
             if (series.Kind == ChartSeriesKind.Benchmark)
             {
                 return await _context.BenchmarkPricePoints
@@ -381,6 +498,32 @@ namespace FINANCEAPP.Services
             var minDate = barsByDate.Min(b => b.Date.Date);
             var maxDate = barsByDate.Max(b => b.Date.Date);
             var now = DateTime.Now;
+
+            if (series.Kind == ChartSeriesKind.Currency)
+            {
+                var existingCurrency = await _context.CurrencyRatePoints
+                    .Where(p => p.CurrencyPairId == series.Id && p.Date >= minDate && p.Date <= maxDate)
+                    .ToDictionaryAsync(p => p.Date.Date);
+
+                foreach (var bar in barsByDate)
+                {
+                    if (!existingCurrency.TryGetValue(bar.Date.Date, out var point))
+                    {
+                        point = new CurrencyRatePoint { CurrencyPairId = series.Id, Date = bar.Date.Date };
+                        _context.CurrencyRatePoints.Add(point);
+                    }
+
+                    point.Open = bar.Open;
+                    point.High = bar.High;
+                    point.Low = bar.Low;
+                    point.Close = bar.Close;
+                    point.Volume = bar.Volume;
+                    point.FetchedAt = now;
+                    touched.Add(point);
+                }
+
+                return touched;
+            }
 
             if (series.Kind == ChartSeriesKind.Benchmark)
             {

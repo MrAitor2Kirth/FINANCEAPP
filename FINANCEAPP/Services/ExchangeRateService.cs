@@ -14,17 +14,20 @@ namespace FINANCEAPP.Services
         private readonly IStockPriceService _stockPriceService;
         private readonly ICountryService _countryService;
         private readonly ICompanyService _companyService;
+        private readonly ICurrencyHistoryService _currencyHistoryService;
 
         public ExchangeRateService(
             AppDbContext context,
             IStockPriceService stockPriceService,
             ICountryService countryService,
-            ICompanyService companyService)
+            ICompanyService companyService,
+            ICurrencyHistoryService currencyHistoryService)
         {
             _context = context;
             _stockPriceService = stockPriceService;
             _countryService = countryService;
             _companyService = companyService;
+            _currencyHistoryService = currencyHistoryService;
         }
 
         /// <summary>Convierte un importe con un tipo de cambio, redondeado a 2 decimales</summary>
@@ -213,6 +216,94 @@ namespace FINANCEAPP.Services
             totals.CurrentValue = Math.Round(value, 2, MidpointRounding.AwayFromZero);
             totals.Dividends = Math.Round(dividends, 2, MidpointRounding.AwayFromZero);
             return totals;
+        }
+
+        // ---------------------------------------------------------------- Tipos que faltan en operaciones (SPEC-01-09, RF-6)
+
+        public async Task<int> CountMissingOperationRatesAsync() => (await LoadMissingRateOperationsAsync()).Count;
+
+        public async Task<List<MissingOperationRate>> GetMissingOperationRatesAsync(CancellationToken cancellationToken = default)
+        {
+            var baseCurrency = await GetBaseCurrencyCodeAsync();
+            var operations = await LoadMissingRateOperationsAsync();
+            var result = new List<MissingOperationRate>();
+
+            foreach (var group in operations.GroupBy(o => o.EffectiveCurrencyCode))
+            {
+                // Una descarga por divisa hasta su operación más antigua
+                var rates = await _currencyHistoryService.GetRatesAtAsync(group.Key, baseCurrency, group.Select(o => o.Date), cancellationToken);
+                foreach (var operation in group)
+                {
+                    result.Add(new MissingOperationRate
+                    {
+                        OperationId = operation.Id,
+                        Date = operation.Date,
+                        CompanyName = operation.CompanyName,
+                        Type = operation.Type,
+                        Amount = operation.Amount,
+                        CurrencyCode = group.Key,
+                        BaseCurrencyCode = baseCurrency,
+                        ProposedRate = rates.TryGetValue(operation.Date.Date, out var rate) ? Math.Round(rate, 6, MidpointRounding.AwayFromZero) : null
+                    });
+                }
+            }
+
+            return result.OrderBy(r => r.Date).ThenBy(r => r.CompanyName).ToList();
+        }
+
+        public async Task<int> SaveOperationRatesAsync(IReadOnlyDictionary<int, decimal> ratesByOperationId)
+        {
+            var valid = ratesByOperationId.Where(kv => kv.Value > 0).ToDictionary(kv => kv.Key, kv => kv.Value);
+            if (valid.Count == 0)
+            {
+                return 0;
+            }
+
+            var baseCurrency = await GetBaseCurrencyCodeAsync();
+            var ids = valid.Keys.ToList();
+
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var operations = await _context.Operations
+                    .Where(o => ids.Contains(o.Id) && o.ExchangeRate == null)
+                    .ToListAsync();
+
+                var saved = 0;
+                foreach (var operation in operations)
+                {
+                    // Solo operaciones en otra divisa: una de la base nunca lleva tipo
+                    if (operation.EffectiveCurrencyCode == baseCurrency)
+                    {
+                        continue;
+                    }
+
+                    operation.ExchangeRate = Math.Round(valid[operation.Id], 6, MidpointRounding.AwayFromZero);
+                    operation.ExchangeRateTo = baseCurrency;
+                    saved++;
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return saved;
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        /// <summary>Operaciones en una divisa distinta de la base y sin tipo guardado (sin seguimiento)</summary>
+        private async Task<List<Operation>> LoadMissingRateOperationsAsync()
+        {
+            var baseCurrency = await GetBaseCurrencyCodeAsync();
+            var operations = await _context.Operations
+                .AsNoTracking()
+                .Where(o => o.ExchangeRate == null && o.CurrencyCode != null)
+                .ToListAsync();
+
+            return operations.Where(o => o.EffectiveCurrencyCode != baseCurrency).ToList();
         }
 
         public async Task<ConvertedSaleTotals> GetConvertedSaleTotalsAsync(IEnumerable<SaleHistory> sales, IReadOnlyDictionary<string, string> currencyByCompany)

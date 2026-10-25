@@ -195,6 +195,8 @@ namespace FINANCEAPP
             builder.Services.AddScoped<IChartMarkService, ChartMarkService>();
             builder.Services.AddScoped<IDividendService, DividendService>();
             builder.Services.AddScoped<IBenchmarkIndexService, BenchmarkIndexService>();
+            builder.Services.AddScoped<ICurrencyHistoryService, CurrencyHistoryService>();
+            builder.Services.AddScoped<IPortfolioPeriodService, PortfolioPeriodService>();
             builder.Services.AddHttpClient<IClaudeDocumentReader, ClaudeDocumentReader>(client =>
             {
                 client.Timeout = TimeSpan.FromSeconds(60);
@@ -232,6 +234,7 @@ namespace FINANCEAPP
                 DatabaseSchemaUpgrader.EnsureDividendPaymentsTable(context);
                 DatabaseSchemaUpgrader.EnsureCompanyNextDividendDateColumn(context);
                 DatabaseSchemaUpgrader.EnsureBenchmarkTables(context);
+                DatabaseSchemaUpgrader.EnsureCurrencyHistoryTables(context);
 
                 // Corrige inmuebles antiguos guardados con total invertido 0 (no tocaba el patrimonio)
                 DatabaseSchemaUpgrader.RepairPropertyTotals(context);

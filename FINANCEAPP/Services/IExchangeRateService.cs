@@ -23,6 +23,31 @@ namespace FINANCEAPP.Services
     /// <summary>
     /// Resultado de actualizar o guardar un tipo de cambio
     /// </summary>
+    /// <summary>
+    /// Operación en otra divisa sin tipo de cambio guardado, con el tipo propuesto (SPEC-01-09, RF-6)
+    /// </summary>
+    public class MissingOperationRate
+    {
+        public int OperationId { get; set; }
+
+        public DateTime Date { get; set; }
+
+        public string CompanyName { get; set; } = string.Empty;
+
+        public string Type { get; set; } = string.Empty;
+
+        public decimal Amount { get; set; }
+
+        /// <summary>Divisa de la operación</summary>
+        public string CurrencyCode { get; set; } = string.Empty;
+
+        /// <summary>Divisa base a la que se convierte</summary>
+        public string BaseCurrencyCode { get; set; } = string.Empty;
+
+        /// <summary>Cierre del par en la fecha de la operación; null si no hay histórico</summary>
+        public decimal? ProposedRate { get; set; }
+    }
+
     public class ExchangeRateResult
     {
         /// <summary>True si el tipo se guardó</summary>
@@ -153,6 +178,24 @@ namespace FINANCEAPP.Services
 
         /// <summary>Totales de las empresas dadas convertidos a la divisa base con el tipo actual</summary>
         Task<ConvertedCompanyTotals> GetConvertedTotalsAsync(IEnumerable<CompanyDetail> companies);
+
+        /// <summary>
+        /// Número de operaciones en una divisa distinta de la base sin tipo de cambio guardado (SPEC-01-09, RF-6)
+        /// </summary>
+        Task<int> CountMissingOperationRatesAsync();
+
+        /// <summary>
+        /// Operaciones sin tipo guardado con el tipo propuesto: el cierre del par en su fecha, del histórico diario de
+        /// tipos (se descarga lo que falte). No guarda nada (SPEC-01-09, RF-6).
+        /// </summary>
+        Task<List<MissingOperationRate>> GetMissingOperationRatesAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Guarda en una transacción el tipo de cada operación indicada que siga sin tipo (solo <c>ExchangeRate</c> y
+        /// <c>ExchangeRateTo</c>; no cambia importes, movimientos bancarios ni el beneficio guardado de las ventas).
+        /// Devuelve cuántas se guardaron (SPEC-01-09, RF-6).
+        /// </summary>
+        Task<int> SaveOperationRatesAsync(IReadOnlyDictionary<int, decimal> ratesByOperationId);
 
         /// <summary>
         /// Totales del histórico de ventas (importe, comisiones y beneficio) convertidos a la divisa base

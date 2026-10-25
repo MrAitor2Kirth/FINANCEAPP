@@ -221,6 +221,80 @@
                     </table>
                 </div>
             }
+
+            @* Tipos que faltan en operaciones antiguas (SPEC-01-09, RF-6): se proponen con el histórico diario de tipos *@
+            @if (missingRateCount > 0)
+            {
+                <div class="alert alert-warning mt-3 mb-0">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                        <span>
+                            <i class="bi bi-exclamation-triangle me-1" aria-hidden="true"></i>
+                            @missingRateCount @(missingRateCount == 1 ? "operación en otra divisa no tiene" : "operaciones en otra divisa no tienen") el tipo de cambio guardado; el histórico de ventas las convierte con el tipo actual.
+                        </span>
+                        @if (missingRates == null)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="ProposeMissingRates" disabled="@isBusy">
+                                @if (isProposingRates)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                }
+                                Proponer tipos
+                            </button>
+                        }
+                    </div>
+
+                    @if (missingRates != null)
+                    {
+                        <p class="small mt-2 mb-2">Tipo propuesto: el cierre del día de cada operación según Yahoo. Puedes corregirlo antes de guardar; los importes, los movimientos del banco y el beneficio guardado de las ventas no cambian.</p>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-2">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha</th>
+                                        <th>Empresa</th>
+                                        <th>Tipo</th>
+                                        <th class="text-end">Importe</th>
+                                        <th>Tipo de cambio</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in missingRates)
+                                    {
+                                        <tr>
+                                            <td class="text-nowrap">@row.Date.ToString("dd/MM/yyyy")</td>
+                                            <td>@row.CompanyName</td>
+                                            <td>@row.Type</td>
+                                            <td class="text-end text-nowrap">@CurrencyFormatter.Format(row.Amount, row.CurrencyCode)</td>
+                                            <td style="max-width: 14rem;">
+                                                <div class="input-group input-group-sm">
+                                                    <span class="input-group-text">1 @row.CurrencyCode =</span>
+                                                    <input class="form-control" inputmode="decimal" placeholder="Sin histórico"
+                                                           aria-label="Tipo de cambio de la operación del @row.Date.ToString("dd/MM/yyyy")"
+                                                           @bind="missingRateInputs[row.OperationId]" disabled="@isBusy" />
+                                                    <span class="input-group-text">@row.BaseCurrencyCode</span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="d-flex flex-wrap justify-content-end align-items-center gap-2">
+                            @if (confirmSaveRates)
+                            {
+                                <span class="small">Se guardará el tipo en @MissingRatesToSave operaciones. ¿Guardar?</span>
+                                <button type="button" class="btn btn-sm btn-primary" @onclick="SaveMissingRates" disabled="@isBusy">Sí, guardar</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => confirmSaveRates = false" disabled="@isBusy">No</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelMissingRates" disabled="@isBusy">Cancelar</button>
+                                <button type="button" class="btn btn-sm btn-primary" @onclick="AskSaveMissingRates" disabled="@(isBusy || MissingRatesToSave == 0)">Guardar tipos</button>
+                            }
+                        </div>
+                    }
+                </div>
+            }
         </div>
     </section>
 
@@ -428,12 +502,102 @@
         }
     }
 
+    // Tipos que faltan en operaciones (SPEC-01-09, RF-6)
+    private int missingRateCount;
+    private List<MissingOperationRate>? missingRates;
+    private Dictionary<int, string> missingRateInputs = new();
+    private bool isProposingRates;
+    private bool confirmSaveRates;
+
+    private Dictionary<int, decimal> ParsedMissingRates => missingRateInputs
+        .Select(kv => (kv.Key, Ok: decimal.TryParse(kv.Value?.Trim().Replace(',', '.'), System.Globalization.NumberStyles.Number,
+            System.Globalization.CultureInfo.InvariantCulture, out var rate), Rate: rate))
+        .Where(x => x.Ok && x.Rate > 0)
+        .ToDictionary(x => x.Key, x => x.Rate);
+
+    private int MissingRatesToSave => ParsedMissingRates.Count;
+
+    private async Task ProposeMissingRates()
+    {
+        if (isBusy)
+        {
+            return;
+        }
+
+        ClearMessages();
+        isBusy = true;
+        isProposingRates = true;
+        try
+        {
+            missingRates = await ExchangeRateService.GetMissingOperationRatesAsync();
+            missingRateInputs = missingRates.ToDictionary(
+                r => r.OperationId,
+                r => r.ProposedRate?.ToString("0.######", System.Globalization.CultureInfo.GetCultureInfo("es-ES")) ?? string.Empty);
+            if (missingRates.Any(r => r.ProposedRate == null))
+            {
+                infoMessage = "Algunas operaciones no tienen tipo propuesto (sin histórico en Yahoo o sin conexión): escríbelo a mano o déjalo vacío.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"No se pudieron proponer los tipos: {ex.Message}";
+            missingRates = null;
+        }
+        finally
+        {
+            isProposingRates = false;
+            isBusy = false;
+        }
+    }
+
+    private void AskSaveMissingRates()
+    {
+        ClearMessages();
+        if (missingRateInputs.Values.Any(v => !string.IsNullOrWhiteSpace(v)) && MissingRatesToSave < missingRateInputs.Values.Count(v => !string.IsNullOrWhiteSpace(v)))
+        {
+            errorMessage = "Hay algún tipo que no es un número mayor que 0 (por ejemplo 0,92). Corrígelo o déjalo vacío.";
+            return;
+        }
+
+        confirmSaveRates = true;
+    }
+
+    private void CancelMissingRates()
+    {
+        missingRates = null;
+        missingRateInputs = new();
+        confirmSaveRates = false;
+    }
+
+    private async Task SaveMissingRates()
+    {
+        ClearMessages();
+        isBusy = true;
+        try
+        {
+            var saved = await ExchangeRateService.SaveOperationRatesAsync(ParsedMissingRates);
+            infoMessage = $"Tipo de cambio guardado en {saved} {(saved == 1 ? "operación" : "operaciones")}.";
+            CancelMissingRates();
+            missingRateCount = await ExchangeRateService.CountMissingOperationRatesAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"No se pudieron guardar los tipos: {ex.Message}";
+        }
+        finally
+        {
+            confirmSaveRates = false;
+            isBusy = false;
+        }
+    }
+
     private async Task LoadRates()
     {
         try
         {
             rateRows = await ExchangeRateService.GetRowsAsync();
             manualRates = rateRows.ToDictionary(r => r.CurrencyCode, _ => string.Empty);
+            missingRateCount = await ExchangeRateService.CountMissingOperationRatesAsync();
         }
         catch (Exception ex)
         {

@@ -132,6 +132,7 @@ FINANCEAPP/                          ← raíz del repositorio
 | `ChartMark` | CompanyId (nulo = global), Date, Description, IsActive (marcas del gráfico, SPEC-05-03) |
 | `BenchmarkIndex` | Name, Symbol (índices para comparar en el gráfico, SPEC-05-04) |
 | `BenchmarkPricePoint` | BenchmarkIndexId, Date, Open, High, Low, Close, Volume, FetchedAt (histórico diario de los índices, SPEC-05-04) |
+| `CurrencyPair` / `CurrencyRatePoint` | Par de divisas (CurrencyCode, BaseCurrencyCode, Symbol) y su cierre diario (histórico de tipos de cambio, SPEC-01-09) |
 | `DividendPayment` | CompanyId, PaymentDate, ExDividendDate, AmountPerShare, NumberOfShares, DividendPercent, Status, OperationId, Source, Notes (calendario de dividendos, SPEC-21-01) |
 | `Fund` | Name, FundType, Manager, TER, ISIN, HistoricalReturn, TotalInvested, CurrentValue |
 | `FundOperation` | FundName, Type, Amount, Date |
@@ -165,6 +166,8 @@ Nota de diseño: las operaciones se enlazan con su entidad principal **por nombr
 | `IChartMarkService` | Marcas temporales del gráfico, de empresa o globales (SPEC-05-03) |
 | `IDividendService` | Calendario de dividendos: líneas, resumen, generar la operación, Inicio, propuestas y marcas del gráfico (SPEC-21-01) |
 | `IBenchmarkIndexService` | Índices para comparar: alta, edición, baja con su histórico, «Comprobar» y sugerencias (SPEC-05-04) |
+| `IPortfolioPeriodService` | Tarjetas de `/companies` por periodo: compras del periodo y cartera al cierre (SPEC-01-09) |
+| `ICurrencyHistoryService` | Tipo de cambio de una fecha a partir del histórico diario por par de divisas (SPEC-01-09) |
 | `ChartComparison` (estático) | Comparación de dos series: alineación, base 100, rentabilidades y correlación del tramo visible (SPEC-05-04) |
 
 ### 3.5 Cotizaciones y gráfico

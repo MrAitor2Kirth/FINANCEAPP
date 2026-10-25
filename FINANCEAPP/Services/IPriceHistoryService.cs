@@ -133,15 +133,30 @@ namespace FINANCEAPP.Services
         /// Igual que <see cref="GetCachedHourly"/> para una empresa o un índice.
         /// </summary>
         PriceHistoryResult GetCachedSeriesHourly(ChartSeriesRef series);
+
+        /// <summary>
+        /// Deja guardado el histórico diario de la serie hasta <paramref name="date"/> (SPEC-01-09): refresca la caché si
+        /// hace falta y, si la fecha es anterior al punto más antiguo y el histórico no está completo, descarga y guarda
+        /// bloques de 10 años hasta cubrirla. Devuelve false si no se pudo (sin conexión o sin datos).
+        /// </summary>
+        Task<bool> EnsureDailyCoverageAsync(ChartSeriesRef series, DateTime date, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Cierre guardado de la serie en <paramref name="date"/> o, si ese día no hubo sesión, el del último día anterior;
+        /// null si no hay ninguno (SPEC-01-09). No descarga nada.
+        /// </summary>
+        Task<decimal?> GetDailyCloseAtAsync(ChartSeriesRef series, DateTime date);
     }
 
     /// <summary>
-    /// Tipo de serie del gráfico (SPEC-05-04): su histórico diario se guarda en PriceHistoryPoints o en BenchmarkPricePoints
+    /// Tipo de serie (SPEC-05-04 y SPEC-01-09): su histórico diario se guarda en PriceHistoryPoints, BenchmarkPricePoints
+    /// o CurrencyRatePoints
     /// </summary>
     public enum ChartSeriesKind
     {
         Company,
-        Benchmark
+        Benchmark,
+        Currency
     }
 
     /// <summary>
@@ -161,8 +176,17 @@ namespace FINANCEAPP.Services
         public static ChartSeriesRef ForBenchmark(int benchmarkIndexId, string symbol, string name = "")
             => new(ChartSeriesKind.Benchmark, benchmarkIndexId, symbol, name);
 
+        /// <summary>Serie de un par de divisas (SPEC-01-09)</summary>
+        public static ChartSeriesRef ForCurrency(int currencyPairId, string symbol, string name = "")
+            => new(ChartSeriesKind.Currency, currencyPairId, symbol, name);
+
         /// <summary>Clave de la serie (memoria de Horas, cola de relleno)</summary>
-        public string Key => (Kind == ChartSeriesKind.Benchmark ? "I:" : "C:") + Id;
+        public string Key => Kind switch
+        {
+            ChartSeriesKind.Benchmark => "I:",
+            ChartSeriesKind.Currency => "X:",
+            _ => "C:"
+        } + Id;
     }
 
     /// <summary>

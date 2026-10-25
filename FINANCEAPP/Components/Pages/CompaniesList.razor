@@ -2,6 +2,8 @@
 @inject ICompanyService CompanyService
 @inject ICountryService CountryService
 @inject IExchangeRateService ExchangeRateService
+@inject IPortfolioPeriodService PortfolioPeriodService
+@using System.Globalization
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
@@ -72,28 +74,94 @@
     }
     else
     {
+        @* Filtro por periodo de las tarjetas (SPEC-01-09): mismo selector que /sales-history; la lista no cambia *@
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <div class="btn-group" role="group" aria-label="Modo de periodo">
+                @foreach (var option in periodModes)
+                {
+                    var mode = option.Mode;
+                    <button type="button" class="btn btn-sm @(periodFilter.Mode == mode ? "btn-primary" : "btn-outline-primary")" disabled="@isLoadingPeriod" @onclick="() => SetPeriodMode(mode)">@option.Text</button>
+                }
+            </div>
+            @if (periodFilter.Mode != SalesPeriodMode.All)
+            {
+                <div class="d-flex align-items-center gap-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@isLoadingPeriod" @onclick="PreviousPeriod" title="Periodo anterior" aria-label="Periodo anterior">
+                        <i class="bi bi-chevron-left"></i>
+                    </button>
+                    @if (periodFilter.Mode == SalesPeriodMode.Day)
+                    {
+                        <input type="date" class="form-control form-control-sm" style="width:auto"
+                               value="@periodFilter.Reference.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)"
+                               @onchange="OnPeriodDayChanged" />
+                    }
+                    else if (periodFilter.Mode == SalesPeriodMode.Month)
+                    {
+                        <input type="month" class="form-control form-control-sm" style="width:auto"
+                               value="@periodFilter.Reference.ToString("yyyy-MM", CultureInfo.InvariantCulture)"
+                               @onchange="OnPeriodMonthChanged" />
+                    }
+                    else
+                    {
+                        <input type="number" class="form-control form-control-sm" style="width:6rem"
+                               min="@SalesPeriodFilter.MinYear" max="@SalesPeriodFilter.MaxYear" step="1"
+                               value="@periodFilter.Reference.Year"
+                               @onchange="OnPeriodYearChanged" />
+                    }
+                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@isLoadingPeriod" @onclick="NextPeriod" title="Periodo siguiente" aria-label="Periodo siguiente">
+                        <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+                @* Lectura del periodo (RF-2) *@
+                <div class="btn-group ms-md-2" role="group" aria-label="Vista del periodo">
+                    @foreach (var option in periodViews)
+                    {
+                        var view = option.View;
+                        <button type="button" class="btn btn-sm @(periodView == view ? "btn-secondary" : "btn-outline-secondary")" disabled="@isLoadingPeriod" @onclick="() => SetPeriodView(view)">@option.Text</button>
+                    }
+                </div>
+            }
+            <span class="fw-bold ms-1">@periodFilter.Label</span>
+            @if (isLoadingPeriod)
+            {
+                <span class="spinner-border spinner-border-sm text-secondary ms-1" role="status"></span>
+            }
+        </div>
+        @if (periodFilter.Mode != SalesPeriodMode.All)
+        {
+            <p class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i>@PeriodExplanation</p>
+        }
+        @if (!string.IsNullOrEmpty(periodError))
+        {
+            <div class="alert alert-warning py-1 px-2 small">@periodError</div>
+        }
+        @foreach (var warning in periodSummary?.Warnings ?? new List<string>())
+        {
+            <div class="alert alert-warning py-1 px-2 small mb-2"><i class="bi bi-exclamation-triangle me-1"></i>@warning</div>
+        }
+
         <!-- Tarjetas de resumen (SPEC-01-08): bloque «Cartera» y bloque «Rentabilidad y diversificación».
              Todo con las empresas con inversión y sus totales convertidos a la divisa base (SPEC-01-05) -->
         <p class="stat-section">Cartera</p>
         <div class="stat-grid stat-grid-3">
             <div class="stat-card" style="--swatch:var(--plum)">
                 <p class="stat-label">Invertido (coste)</p>
-                <p class="stat-value">@(portfolioResult.HasValue ? CurrencyFormatter.Format(investedTotals.InvestedInitial, investedTotals.BaseCurrencyCode) : "—")</p>
+                <p class="stat-value">@(CardResult.HasValue ? CurrencyFormatter.Format(CardTotals.InvestedInitial, CardTotals.BaseCurrencyCode) : "—")</p>
             </div>
             <div class="stat-card" style="--swatch:var(--indigo)">
-                <p class="stat-label">Valor actual</p>
-                <p class="stat-value">@(portfolioResult.HasValue ? CurrencyFormatter.Format(investedTotals.CurrentValue, investedTotals.BaseCurrencyCode) : "—")</p>
+                <p class="stat-label">@ValueLabel</p>
+                <p class="stat-value">@(CardResult.HasValue ? CurrencyFormatter.Format(CardTotals.CurrentValue, CardTotals.BaseCurrencyCode) : "—")</p>
             </div>
-            <div class="stat-card" style="--swatch:@(SignSwatch(portfolioResult))">
+            <div class="stat-card" style="--swatch:@(SignSwatch(CardResult))">
                 <p class="stat-label">Resultado</p>
-                @if (portfolioResult.HasValue)
+                @if (CardResult.HasValue)
                 {
-                    <p class="stat-value" style="color:@SignSwatch(portfolioResult)">
-                        @(portfolioResult.Value >= 0 ? "▲ +" : "▼ ")@CurrencyFormatter.Format(portfolioResult.Value, investedTotals.BaseCurrencyCode)
+                    <p class="stat-value" style="color:@SignSwatch(CardResult)">
+                        @(CardResult.Value >= 0 ? "▲ +" : "▼ ")@CurrencyFormatter.Format(CardResult.Value, CardTotals.BaseCurrencyCode)
                     </p>
-                    @if (investedTotals.Dividends > 0)
+                    @if (CardDividends > 0)
                     {
-                        <p class="stat-sub">+ @CurrencyFormatter.Format(investedTotals.Dividends, investedTotals.BaseCurrencyCode) en dividendos</p>
+                        <p class="stat-sub">+ @CurrencyFormatter.Format(CardDividends, CardTotals.BaseCurrencyCode) @CardDividendsText</p>
                     }
                 }
                 else
@@ -102,23 +170,34 @@
                 }
             </div>
         </div>
-        @if (investedTotals.MissingRateCompanies > 0)
+        @if (CardTotals.MissingRateCompanies > 0)
         {
             @* Un solo aviso para los dos bloques: todos usan los mismos totales (SPEC-01-08, D5) *@
             <p class="stat-note small text-muted">
-                <i class="bi bi-info-circle me-1"></i>@investedTotals.MissingRateCompanies @(investedTotals.MissingRateCompanies == 1 ? "empresa en otra divisa sin tipo de cambio no incluida" : "empresas en otra divisa sin tipo de cambio no incluidas") en los importes ni en la rentabilidad. <a href="/settings">Configurar tipos</a>
+                <i class="bi bi-info-circle me-1"></i>@CardTotals.MissingRateCompanies @(CardTotals.MissingRateCompanies == 1 ? "empresa en otra divisa sin tipo de cambio no incluida" : "empresas en otra divisa sin tipo de cambio no incluidas") en los importes ni en la rentabilidad. <a href="/settings">Configurar tipos</a>
+            </p>
+        }
+
+        @if (periodSummary != null && !periodSummary.HasData)
+        {
+            <p class="stat-note small text-muted"><i class="bi bi-info-circle me-1"></i>@(periodSummary.IsFuture ? "Sin datos para un periodo futuro." : periodView == PeriodSummaryView.Purchases ? "Sin compras en este periodo que sigas teniendo." : "No tenías acciones en esa fecha.")</p>
+        }
+        @if (periodSummary != null && periodSummary.SoldPurchasesAmount > 0)
+        {
+            <p class="stat-note small text-muted">
+                <i class="bi bi-info-circle me-1"></i>@CurrencyFormatter.Format(periodSummary.SoldPurchasesAmount, CardTotals.BaseCurrencyCode) de compras de este periodo ya vendidas. <a href="/sales-history">Ver histórico de ventas</a>
             </p>
         }
 
         <p class="stat-section">Rentabilidad y diversificación</p>
         <div class="stat-grid stat-grid-4">
             @* Por precio (SPEC-01-05) y con dividendos (SPEC-01-07), ponderadas por lo invertido *@
-            <div class="stat-card span-2" style="--swatch:@(SignSwatch(weightedReturn))">
+            <div class="stat-card span-2" style="--swatch:@(SignSwatch(CardReturn))">
                 <p class="stat-label">Rentabilidad media</p>
-                @if (weightedReturn.HasValue)
+                @if (CardReturn.HasValue)
                 {
-                    <p class="stat-value" style="color:@SignSwatch(weightedReturn)">
-                        @(weightedReturn.Value >= 0 ? "▲" : "▼") @weightedReturn.Value.ToString("N2")%
+                    <p class="stat-value" style="color:@SignSwatch(CardReturn)">
+                        @(CardReturn.Value >= 0 ? "▲" : "▼") @CardReturn.Value.ToString("N2")%
                         <span class="stat-value-unit">por precio</span>
                     </p>
                 }
@@ -126,25 +205,25 @@
                 {
                     <p class="stat-value">—</p>
                 }
-                @if (weightedReturnWithDividends.HasValue)
+                @if (CardReturnWithDividends.HasValue && (periodSummary == null || periodSummary.ShowReturnWithDividends))
                 {
                     <p class="stat-sub">
-                        <span style="color:@SignSwatch(weightedReturnWithDividends)">@(weightedReturnWithDividends.Value >= 0 ? "▲" : "▼") @weightedReturnWithDividends.Value.ToString("N2")%</span>
+                        <span style="color:@SignSwatch(CardReturnWithDividends)">@(CardReturnWithDividends.Value >= 0 ? "▲" : "▼") @CardReturnWithDividends.Value.ToString("N2")%</span>
                         con dividendos
                     </p>
                 }
             </div>
             <div class="stat-card" style="--swatch:var(--teal)">
                 <p class="stat-label">Empresas · sectores</p>
-                <p class="stat-value">@investedCompanies.Count · @uniqueSectorsCount</p>
-                @if (investedCompanies.Count < companies.Count)
+                <p class="stat-value">@CardCompanies.Count · @CardSectorsCount</p>
+                @if (periodSummary == null && CardCompanies.Count < companies.Count)
                 {
                     <p class="stat-sub">de @companies.Count en el catálogo</p>
                 }
             </div>
             <div class="stat-card" style="--swatch:var(--amber)">
                 <p class="stat-label">Yield medio</p>
-                <p class="stat-value">@(averageDividendYield.HasValue ? averageDividendYield.Value.ToString("N2") + "%" : "—")</p>
+                <p class="stat-value">@(CardDividendYield.HasValue ? CardDividendYield.Value.ToString("N2") + "%" : "—")</p>
             </div>
         </div>
 
@@ -162,7 +241,15 @@
             </div>
             <div class="card-body p-0">
                 @* Modo corto: solo empresas con inversión (SPEC-01-05); la lista extendida muestra todo el catálogo *@
-                @if (!isExtended && investedCompanies.Count == 0)
+                @if (!isExtended && periodSummary != null)
+                {
+                    @* SPEC-01-10: con un periodo, la tabla muestra las empresas y las cifras del periodo *@
+                    <div class="small text-muted px-3 pt-2">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Mostrando @periodSummary.Companies.Count de @companies.Count empresas @PeriodListText. Pulsa «Lista extendible» para ver todas.
+                    </div>
+                }
+                else if (!isExtended && investedCompanies.Count == 0)
                 {
                     <div class="alert alert-info m-3 mb-3">
                         <i class="bi bi-info-circle me-1"></i>
@@ -500,12 +587,164 @@
     private List<CompanyDetail> investedCompanies = new();
     private ConvertedCompanyTotals investedTotals = new();
     private Dictionary<int, decimal> weights = new();
-    private List<CompanyDetail> visibleCompanies => isExtended ? companies ?? new() : investedCompanies;
+    private List<CompanyDetail> visibleCompanies => isExtended ? companies ?? new() : periodSummary?.Companies ?? investedCompanies;
+
+    // Las filas del periodo son copias: las acciones de fila actúan sobre la empresa real (SPEC-01-10, RF-4)
+    private CompanyDetail RealCompany(CompanyDetail company) => companies?.FirstOrDefault(c => c.Id == company.Id) ?? company;
+
+    private string PeriodListText => periodView == PeriodSummaryView.Purchases
+        ? $"con compras en {periodFilter.Label}"
+        : periodSummary?.CutoffDate is DateTime cutoff ? $"con acciones el {cutoff:dd/MM/yyyy}" : "con acciones en el periodo";
     private int uniqueSectorsCount => investedCompanies.Select(c => c.Sector).Distinct().Count();
     private decimal? averageDividendYield => InvestedCompaniesSummary.AverageDividendYield(investedCompanies);
     private decimal? weightedReturn => InvestedCompaniesSummary.WeightedReturnPercent(investedTotals);
     private decimal? weightedReturnWithDividends => InvestedCompaniesSummary.WeightedReturnWithDividendsPercent(investedTotals);
     private decimal? portfolioResult => InvestedCompaniesSummary.UnrealizedResult(investedTotals);
+
+    // Filtro por periodo de las tarjetas (SPEC-01-09): por defecto Total histórico (las tarjetas de hoy); no se recuerda
+    private SalesPeriodFilter periodFilter = SalesPeriodFilter.All;
+    private PeriodSummaryView periodView = PeriodSummaryView.Purchases;
+    private PeriodSummary? periodSummary;
+    private bool isLoadingPeriod;
+    private string? periodError;
+    private CancellationTokenSource? periodCts;
+    private static readonly (SalesPeriodMode Mode, string Text)[] periodModes =
+    {
+        (SalesPeriodMode.Day, "Día"),
+        (SalesPeriodMode.Month, "Mes"),
+        (SalesPeriodMode.Year, "Año"),
+        (SalesPeriodMode.All, "Total histórico")
+    };
+    private static readonly (PeriodSummaryView View, string Text)[] periodViews =
+    {
+        (PeriodSummaryView.Purchases, "Compras del periodo"),
+        (PeriodSummaryView.Closing, "Cartera al cierre")
+    };
+
+    // Lo que pintan las tarjetas: el periodo elegido o, en Total histórico, las empresas con inversión de hoy
+    private ConvertedCompanyTotals CardTotals => periodSummary?.Totals ?? investedTotals;
+    private List<CompanyDetail> CardCompanies => periodSummary?.Companies ?? investedCompanies;
+    private int CardSectorsCount => CardCompanies.Select(c => c.Sector).Distinct().Count();
+    private decimal? CardDividendYield => InvestedCompaniesSummary.AverageDividendYield(CardCompanies);
+    private decimal? CardReturn => InvestedCompaniesSummary.WeightedReturnPercent(CardTotals);
+    private decimal? CardReturnWithDividends => InvestedCompaniesSummary.WeightedReturnWithDividendsPercent(CardTotals);
+    private decimal? CardResult => InvestedCompaniesSummary.UnrealizedResult(CardTotals);
+    private decimal CardDividends => periodSummary != null && periodView == PeriodSummaryView.Purchases
+        ? periodSummary.PeriodDividends
+        : CardTotals.Dividends;
+    private string CardDividendsText => periodSummary == null
+        ? "en dividendos"
+        : periodView == PeriodSummaryView.Purchases
+            ? "en dividendos cobrados en el periodo"
+            : "en dividendos cobrados hasta esa fecha";
+    private string ValueLabel => periodSummary?.CutoffDate is DateTime cutoff ? $"Valor al {cutoff:dd/MM/yyyy}" : "Valor actual";
+
+    private string PeriodExplanation => periodView == PeriodSummaryView.Purchases
+        ? $"Compras y traspasos de {PeriodPhrase} que sigues teniendo, valorados hoy con el tipo de cambio actual."
+        : $"Tu cartera tal como estaba al cierre de {PeriodPhrase}, con los precios y el tipo de cambio de esa fecha.";
+
+    private string PeriodPhrase => periodFilter.Mode switch
+    {
+        SalesPeriodMode.Day => $"el {periodFilter.Reference:dd/MM/yyyy}",
+        SalesPeriodMode.Month => periodFilter.Label.ToLower(CultureInfo.GetCultureInfo("es-ES")),
+        SalesPeriodMode.Year => periodFilter.Reference.Year.ToString(CultureInfo.InvariantCulture),
+        _ => string.Empty
+    };
+
+    private Task SetPeriodMode(SalesPeriodMode mode) => ApplyPeriodAsync(periodFilter.WithMode(mode), periodView);
+
+    private Task SetPeriodView(PeriodSummaryView view) => ApplyPeriodAsync(periodFilter, view);
+
+    private Task PreviousPeriod() => ApplyPeriodAsync(periodFilter.Previous(), periodView);
+
+    private Task NextPeriod() => ApplyPeriodAsync(periodFilter.Next(), periodView);
+
+    private async Task OnPeriodDayChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParseExact(e.Value?.ToString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+        {
+            await ApplyPeriodAsync(SalesPeriodFilter.Create(SalesPeriodMode.Day, day), periodView);
+        }
+        else
+        {
+            periodError = "Indica un día válido.";
+        }
+    }
+
+    private async Task OnPeriodMonthChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParseExact(e.Value?.ToString(), "yyyy-MM", CultureInfo.InvariantCulture, DateTimeStyles.None, out var month))
+        {
+            await ApplyPeriodAsync(SalesPeriodFilter.Create(SalesPeriodMode.Month, month), periodView);
+        }
+        else
+        {
+            periodError = "Indica un mes válido.";
+        }
+    }
+
+    private async Task OnPeriodYearChanged(ChangeEventArgs e)
+    {
+        var yearFilter = int.TryParse(e.Value?.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var year)
+            ? SalesPeriodFilter.TryCreateYear(year)
+            : null;
+        if (yearFilter != null)
+        {
+            await ApplyPeriodAsync(yearFilter, periodView);
+        }
+        else
+        {
+            periodError = $"Indica un año entre {SalesPeriodFilter.MinYear} y {SalesPeriodFilter.MaxYear}.";
+        }
+    }
+
+    /// <summary>
+    /// Recalcula las tarjetas para el periodo y la vista (SPEC-01-09). Total histórico vuelve a las de hoy.
+    /// </summary>
+    private async Task ApplyPeriodAsync(SalesPeriodFilter filter, PeriodSummaryView view)
+    {
+        periodFilter = filter;
+        periodView = view;
+        periodError = null;
+        periodCts?.Cancel();
+
+        if (filter.Mode == SalesPeriodMode.All)
+        {
+            periodSummary = null;
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        periodCts = cts;
+        isLoadingPeriod = true;
+        try
+        {
+            var summary = view == PeriodSummaryView.Purchases
+                ? await PortfolioPeriodService.GetPurchasesSummaryAsync(filter)
+                : await PortfolioPeriodService.GetClosingSummaryAsync(filter, cts.Token);
+
+            // Si mientras tanto se eligió otro periodo, este resultado ya no vale
+            if (periodCts == cts)
+            {
+                periodSummary = summary;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            periodSummary = null;
+            periodError = $"No se pudieron calcular las cifras del periodo: {ex.Message}";
+        }
+        finally
+        {
+            if (periodCts == cts)
+            {
+                isLoadingPeriod = false;
+            }
+        }
+    }
 
     // Verde si es ≥ 0, rojo si es negativo y gris sin dato
     private static string SignSwatch(decimal? value) => value.HasValue ? (value.Value >= 0 ? "var(--gain)" : "var(--loss)") : "var(--ink-soft)";
@@ -520,7 +759,7 @@
 
     private async Task ShowDetails(CompanyDetail company)
     {
-        exchangeDetails = await ExchangeRateService.GetCompanyDetailsAsync(company);
+        exchangeDetails = await ExchangeRateService.GetCompanyDetailsAsync(RealCompany(company));
     }
 
     private void CloseDetails() => exchangeDetails = null;
@@ -634,6 +873,7 @@
     /// </summary>
     private async Task ConfirmDelete(CompanyDetail company)
     {
+        company = RealCompany(company);
         companyToDelete = company;
         companyToDeleteOperationsCount = await CompanyService.CountOperationsAsync(company.Name);
         companyToDeleteBankMovementsCount = await CompanyService.CountBankMovementsAsync(company.Name);
@@ -648,7 +888,7 @@
     {
         if (chartModal != null)
         {
-            await chartModal.ShowAsync(company);
+            await chartModal.ShowAsync(RealCompany(company));
         }
     }
 

@@ -652,6 +652,59 @@ namespace FINANCEAPP.Data
         }
 
         /// <summary>
+        /// Crea las tablas CurrencyPairs y CurrencyRatePoints (histórico diario de tipos de cambio, SPEC-01-09) y sus
+        /// índices únicos si no existen. Sin claves foráneas. No toca ninguna otra tabla ni dato.
+        /// </summary>
+        public static void EnsureCurrencyHistoryTables(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""CurrencyPairs"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_CurrencyPairs"" PRIMARY KEY AUTOINCREMENT,
+                        ""CurrencyCode"" TEXT NOT NULL,
+                        ""BaseCurrencyCode"" TEXT NOT NULL,
+                        ""Symbol"" TEXT NOT NULL,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_CurrencyPairs_CurrencyCode_BaseCurrencyCode"" ON ""CurrencyPairs"" (""CurrencyCode"", ""BaseCurrencyCode"");
+
+                    CREATE TABLE IF NOT EXISTS ""CurrencyRatePoints"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_CurrencyRatePoints"" PRIMARY KEY AUTOINCREMENT,
+                        ""CurrencyPairId"" INTEGER NOT NULL,
+                        ""Date"" TEXT NOT NULL,
+                        ""Open"" decimal(18,6) NOT NULL,
+                        ""High"" decimal(18,6) NOT NULL,
+                        ""Low"" decimal(18,6) NOT NULL,
+                        ""Close"" decimal(18,6) NOT NULL,
+                        ""Volume"" INTEGER NOT NULL,
+                        ""FetchedAt"" TEXT NOT NULL
+                    );
+
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_CurrencyRatePoints_CurrencyPairId_Date"" ON ""CurrencyRatePoints"" (""CurrencyPairId"", ""Date"");
+                ";
+                command.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
         /// Crea la tabla WealthSnapshots (capturas mensuales del patrimonio, SPEC-17-01) y su índice
         /// único por año y mes si no existen. No toca ninguna otra tabla ni dato.
         /// </summary>

@@ -148,6 +148,16 @@ namespace FINANCEAPP.Data
         public DbSet<BenchmarkPricePoint> BenchmarkPricePoints { get; set; }
 
         /// <summary>
+        /// DbSet de los pares de divisas con histórico de tipos (SPEC-01-09). Tabla CurrencyPairs
+        /// </summary>
+        public DbSet<CurrencyPair> CurrencyPairs { get; set; }
+
+        /// <summary>
+        /// DbSet del histórico diario de tipos de cambio (SPEC-01-09). Tabla CurrencyRatePoints
+        /// </summary>
+        public DbSet<CurrencyRatePoint> CurrencyRatePoints { get; set; }
+
+        /// <summary>
         /// DbSet del calendario de dividendos (SPEC-21-01). Tabla DividendPayments
         /// </summary>
         public DbSet<DividendPayment> DividendPayments { get; set; }
@@ -1086,6 +1096,29 @@ namespace FINANCEAPP.Data
                 entity.HasIndex(e => new { e.BenchmarkIndexId, e.Date })
                     .IsUnique()
                     .HasDatabaseName("IX_BenchmarkPricePoints_BenchmarkIndexId_Date");
+            });
+
+            // Histórico de tipos de cambio (SPEC-01-09). Sin claves foráneas
+            modelBuilder.Entity<CurrencyPair>(entity =>
+            {
+                entity.ToTable("CurrencyPairs");
+
+                entity.HasIndex(e => new { e.CurrencyCode, e.BaseCurrencyCode })
+                    .IsUnique()
+                    .HasDatabaseName("IX_CurrencyPairs_CurrencyCode_BaseCurrencyCode");
+
+                entity.Property(e => e.CurrencyCode).IsRequired().HasMaxLength(3);
+                entity.Property(e => e.BaseCurrencyCode).IsRequired().HasMaxLength(3);
+                entity.Property(e => e.Symbol).IsRequired().HasMaxLength(20);
+            });
+
+            modelBuilder.Entity<CurrencyRatePoint>(entity =>
+            {
+                entity.ToTable("CurrencyRatePoints");
+
+                entity.HasIndex(e => new { e.CurrencyPairId, e.Date })
+                    .IsUnique()
+                    .HasDatabaseName("IX_CurrencyRatePoints_CurrencyPairId_Date");
             });
         }
     }
