@@ -63,3 +63,7 @@ Obtiene el último precio de cada empresa desde Yahoo Finance y lo guarda en la 
 - Depende de un endpoint no oficial de Yahoo Finance que puede cambiar o limitar peticiones.
 - `RefreshLivePriceAsync` pone `LivePriceUpdatedAt` a la hora actual también cuando falla, así que el listado puede mostrar una hora reciente sin precio nuevo. `RefreshLiveQuoteAsync` (gráfico) no lo hace; corregir el primero queda pendiente.
 - Requiere conexión a Internet; sin ella se mantiene el último precio guardado.
+
+## 9. Features relacionadas
+
+- [SPEC-05-02 · Histórico completo y temporalidades del gráfico](../spec05-grafico-de-cotizacion/spec05-02-chart-timeframes/spec05-02.md): nuevo `GetHistoryRangeAsync` que pide a Yahoo un tramo entre dos fechas (`period1`/`period2`) en barras diarias o de una hora (`interval=1h`, hora local), lee `firstTradeDate`, prueba los sufijos de bolsa solo si el símbolo no existe y distingue fallo de red de «sin datos»; acepta cancelación. `GetDailyHistoryAsync` se conserva sin uso.

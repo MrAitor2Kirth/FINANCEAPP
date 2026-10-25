@@ -6,7 +6,11 @@
 @inject ICompanyService CompanyService
 @inject IAppSettingsService AppSettingsService
 @inject IExchangeRateService ExchangeRateService
+@inject IBankService BankService
 @inject ICountryService CountryService
+@inject IChartMarkService ChartMarkService
+@inject IDividendService DividendService
+@inject IBenchmarkIndexService BenchmarkIndexService
 @inject IJSRuntime JS
 @inject ILogger<CompanyChartModal> Logger
 
@@ -121,7 +125,7 @@
                                 <strong>@(tradeType == "Compra" ? "Comprar" : "Vender") @company?.Name</strong>
                                 @if (tradeType == "Venta")
                                 {
-                                    <span class="small text-muted">Acciones disponibles: <strong>@availableShares</strong></span>
+                                    <span class="small text-muted">Acciones disponibles: <strong>@ShareQuantity.Format(availableShares)</strong></span>
                                 }
                             </div>
                             <div class="row g-2">
@@ -133,8 +137,8 @@
                                 </div>
                                 <div class="col-6 col-md-2">
                                     <label class="form-label">Acciones</label>
-                                    <input type="number" min="1" step="1" class="form-control form-control-sm"
-                                           @bind="tradeShares" />
+                                    <input type="number" min="0.01" step="0.01" class="form-control form-control-sm"
+                                           inputmode="decimal" @bind="tradeShares" />
                                 </div>
                                 <div class="col-6 col-md-2">
                                     <label class="form-label">Precio por acción</label>
@@ -161,6 +165,24 @@
                                         <input type="number" min="0" step="0.000001" class="form-control form-control-sm"
                                                placeholder="Sin tipo"
                                                @bind="tradeExchangeRate" />
+                                    </div>
+                                }
+                                @if (tradeBankAccounts.Count > 0)
+                                {
+                                    @* Cuenta del movimiento: ingreso de la venta (SPEC-02-04) o gasto de la compra (SPEC-02-06); vacía = la más antigua *@
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Cuenta bancaria</label>
+                                        <select class="form-select form-select-sm" @bind="tradeBankAccountName">
+                                            <option value="">Por defecto: @defaultTradeBankAccountName</option>
+                                            @if (tradeType == "Compra")
+                                            {
+                                                <option value="@OperationAmountCalculator.NoBankMovementValue">No registrar en banco</option>
+                                            }
+                                            @foreach (var account in tradeBankAccounts)
+                                            {
+                                                <option value="@account.Name">@account.Name</option>
+                                            }
+                                        </select>
                                     </div>
                                 }
                                 <div class="col-6 col-md-2">
@@ -207,56 +229,166 @@
                             <div class="form-check form-switch mb-0">
                                 <input class="form-check-input" type="checkbox" id="@($"{chartElementId}-avg")"
                                        checked="@preferences.ShowAverage"
-                                       disabled="@(isLoadingChart || !HasPosition)"
+                                       disabled="@(isLoadingChart || !HasPosition || IsComparing)"
                                        @onchange="e => ToggleLayerAsync(LayerAverage, (bool)e.Value!)" />
                                 <label class="form-check-label" for="@($"{chartElementId}-avg")">Precio medio y resultado</label>
                             </div>
                             <div class="form-check form-switch mb-0">
                                 <input class="form-check-input" type="checkbox" id="@($"{chartElementId}-candles")"
                                        checked="@preferences.ShowCandles"
-                                       disabled="@isLoadingChart"
+                                       disabled="@(isLoadingChart || IsComparing)"
                                        @onchange="e => ToggleLayerAsync(LayerCandles, (bool)e.Value!)" />
                                 <label class="form-check-label" for="@($"{chartElementId}-candles")">Velas</label>
                             </div>
                             <div class="form-check form-switch mb-0">
                                 <input class="form-check-input" type="checkbox" id="@($"{chartElementId}-volume")"
                                        checked="@preferences.ShowVolume"
-                                       disabled="@isLoadingChart"
+                                       disabled="@(isLoadingChart || IsComparing)"
                                        @onchange="e => ToggleLayerAsync(LayerVolume, (bool)e.Value!)" />
                                 <label class="form-check-label" for="@($"{chartElementId}-volume")">Volumen</label>
                             </div>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" id="@($"{chartElementId}-marks")"
+                                       checked="@preferences.ShowMarks"
+                                       disabled="@isLoadingChart"
+                                       @onchange="e => ToggleLayerAsync(LayerMarks, (bool)e.Value!)" />
+                                <label class="form-check-label" for="@($"{chartElementId}-marks")">Marcas</label>
+                            </div>
                         </div>
-                        <div class="d-flex gap-2 align-items-center">
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            @* Comparación con otra empresa o un índice (SPEC-05-04, RF-3) *@
+                            @if (IsComparing)
+                            {
+                                <button type="button" class="btn btn-sm btn-compare"
+                                        title="Volver al gráfico normal"
+                                        disabled="@(isLoadingChart || isLoadingComparison)"
+                                        @onclick="ClearComparisonAsync">
+                                    <i class="bi bi-x-lg me-1"></i>Quitar comparación
+                                </button>
+                            }
+                            else if (comparePickerOpen)
+                            {
+                                <select class="form-select form-select-sm compare-select"
+                                        disabled="@(isLoadingChart || isLoadingComparison)"
+                                        @onchange="OnCompareSelectedAsync">
+                                    <option value="">Comparar con…</option>
+                                    @if (compareCompanies.Count > 0)
+                                    {
+                                        <optgroup label="Empresas">
+                                            @foreach (var other in compareCompanies)
+                                            {
+                                                <option value="@($"C:{other.Id}")">@other.Name (@other.Ticker)</option>
+                                            }
+                                        </optgroup>
+                                    }
+                                    @if (compareIndices.Count > 0)
+                                    {
+                                        <optgroup label="Índices">
+                                            @foreach (var index in compareIndices)
+                                            {
+                                                <option value="@($"I:{index.Id}")">@index.Name (@index.Symbol)</option>
+                                            }
+                                        </optgroup>
+                                    }
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" title="Cerrar el selector" @onclick="() => comparePickerOpen = false">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-compare"
+                                        title="Superponer otra empresa o un índice en base 100"
+                                        disabled="@(company == null || isLoadingChart || chartError != null)"
+                                        @onclick="OpenComparePickerAsync">
+                                    <i class="bi bi-intersect me-1"></i>Comparar
+                                </button>
+                            }
+                            <button type="button" class="btn btn-sm btn-chart-mark"
+                                    title="Añadir una marca con fecha y descripción sobre el gráfico"
+                                    disabled="@(company == null || isSavingMark)"
+                                    @onclick="() => OpenMarkForm(null)">
+                                <i class="bi bi-bookmark-plus me-1"></i>Añadir marca
+                            </button>
                             <button type="button" class="btn btn-sm btn-outline-secondary"
                                     title="Volver a descargar el histórico de Yahoo Finance aunque la caché sea reciente"
                                     disabled="@isLoadingChart"
                                     @onclick="ReloadHistoryAsync">
                                 <i class="bi bi-cloud-download me-1"></i>Recargar histórico
                             </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    title="Volver al tramo inicial de la temporalidad"
+                                    disabled="@(isLoadingChart || chartError != null)"
+                                    @onclick="ResetViewAsync">
+                                <i class="bi bi-arrows-angle-contract me-1"></i>Vista inicial
+                            </button>
+                            @* Temporalidades de más fina a más gruesa (SPEC-05-02, RF-6) *@
                             <div class="btn-group" role="group">
-                                <button type="button" class="btn btn-sm @(granularity == ChartGranularity.Daily ? "btn-primary" : "btn-outline-primary")"
-                                        disabled="@isLoadingChart"
-                                        @onclick="() => ChangeGranularityAsync(ChartGranularity.Daily)">
-                                    Diario
-                                </button>
-                                <button type="button" class="btn btn-sm @(granularity == ChartGranularity.Monthly ? "btn-primary" : "btn-outline-primary")"
-                                        disabled="@isLoadingChart"
-                                        @onclick="() => ChangeGranularityAsync(ChartGranularity.Monthly)">
-                                    Mensual
-                                </button>
-                                <button type="button" class="btn btn-sm @(granularity == ChartGranularity.Yearly ? "btn-primary" : "btn-outline-primary")"
-                                        disabled="@isLoadingChart"
-                                        @onclick="() => ChangeGranularityAsync(ChartGranularity.Yearly)">
-                                    Anual
-                                </button>
+                                @foreach (var option in GranularityOptions)
+                                {
+                                    <button type="button" class="btn btn-sm @(granularity == option.Value ? "btn-primary" : "btn-outline-primary")"
+                                            disabled="@isLoadingChart"
+                                            @onclick="() => ChangeGranularityAsync(option.Value)">
+                                        @option.Label
+                                    </button>
+                                }
                             </div>
                         </div>
                     </div>
 
-                    @if (preferences.ShowAverage && HasPosition && company != null)
+                    @* ---------- Formulario de marca (SPEC-05-03, RF-8 y RF-12) ---------- *@
+                    @if (markFormOpen)
+                    {
+                        <div class="mark-form mb-3">
+                            <strong class="d-block mb-2">@(editingMarkId.HasValue ? "Editar marca" : "Añadir marca")</strong>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-6 col-md-2">
+                                    <label class="form-label">Fecha</label>
+                                    <input type="date" class="form-control form-control-sm"
+                                           max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                                           @bind="markInput.Date" />
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <label class="form-label">Descripción</label>
+                                    <input type="text" class="form-control form-control-sm" maxlength="200"
+                                           placeholder="p. ej. Resultados del tercer trimestre"
+                                           @bind="markInput.Description" />
+                                </div>
+                                <div class="col-12 col-md-4">
+                                    <label class="form-label d-block">Tipo</label>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="@($"{chartElementId}-marktype")" id="@($"{chartElementId}-marktype-company")"
+                                               checked="@(!markInput.IsGlobal)" @onchange="() => markInput.IsGlobal = false" />
+                                        <label class="form-check-label" for="@($"{chartElementId}-marktype-company")">Empresa</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="@($"{chartElementId}-marktype")" id="@($"{chartElementId}-marktype-global")"
+                                               checked="@markInput.IsGlobal" @onchange="() => markInput.IsGlobal = true" />
+                                        <label class="form-check-label" for="@($"{chartElementId}-marktype-global")">Global (todas las empresas)</label>
+                                    </div>
+                                </div>
+                            </div>
+                            @if (!string.IsNullOrEmpty(markError))
+                            {
+                                <div class="alert alert-danger py-1 px-2 small mt-2 mb-0">@markError</div>
+                            }
+                            <div class="d-flex justify-content-end gap-2 mt-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelMarkForm" disabled="@isSavingMark">Cancelar</button>
+                                <button type="button" class="btn btn-sm btn-chart-mark" @onclick="SaveMarkAsync" disabled="@isSavingMark">
+                                    @if (isSavingMark)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    Guardar marca
+                                </button>
+                            </div>
+                        </div>
+                    }
+
+                    @if (preferences.ShowAverage && HasPosition && company != null && !IsComparing)
                     {
                         <div class="position-summary mb-2">
-                            <span>Acciones <strong>@company.NumberOfShares</strong></span>
+                            <span>Acciones <strong>@ShareQuantity.Format(company.NumberOfShares)</strong></span>
                             <span>Precio medio <strong>@(company.AveragePurchasePrice.HasValue ? CurrencyFormatter.Format(company.AveragePurchasePrice.Value, CurrencyCode) : "N/D")</strong></span>
                             <span>Invertido <strong>@CurrencyFormatter.Format(company.TotalInvestedInitial, CurrencyCode)</strong></span>
                             <span>Valor actual <strong>@CurrencyFormatter.Format(company.TotalInvestedValue, CurrencyCode)</strong></span>
@@ -270,6 +402,43 @@
                     {
                         <div class="alert alert-warning py-1 px-2 small mb-2">
                             <i class="bi bi-exclamation-triangle-fill me-1"></i>@historyWarning
+                        </div>
+                    }
+
+                    @* Descarga del histórico antiguo en segundo plano (SPEC-05-02, RF-4, RF-5 y RF-9) *@
+                    @foreach (var message in new[] { backfillMessage, hourlyBackfillMessage })
+                    {
+                        @if (!string.IsNullOrEmpty(message))
+                        {
+                            <div class="alert alert-info py-1 px-2 small mb-2">
+                                <span class="spinner-border spinner-border-sm me-1"></span>@message
+                            </div>
+                        }
+                    }
+                    @* Comparación (SPEC-05-04): carga de la serie comparada y avisos *@
+                    @if (isLoadingComparison)
+                    {
+                        <div class="alert alert-info py-1 px-2 small mb-2">
+                            <span class="spinner-border spinner-border-sm me-1"></span>@comparisonLoadingMessage
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(comparisonWarning))
+                    {
+                        <div class="alert alert-warning alert-dismissible py-1 px-2 small mb-2">
+                            <i class="bi bi-exclamation-triangle me-1"></i>@comparisonWarning
+                            <button type="button" class="btn-close btn-sm" @onclick="() => comparisonWarning = null" aria-label="Cerrar"></button>
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(comparedBackfillMessage))
+                    {
+                        <div class="alert alert-info py-1 px-2 small mb-2">
+                            <span class="spinner-border spinner-border-sm me-1"></span>@comparedBackfillMessage
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(backfillError))
+                    {
+                        <div class="alert alert-warning py-1 px-2 small mb-2">
+                            <i class="bi bi-cloud-slash me-1"></i>@backfillError
                         </div>
                     }
 
@@ -289,16 +458,128 @@
 
                     <div id="@chartElementId" style="@(isLoadingChart || chartError != null ? "display:none;" : "")"></div>
                     <div id="@volumeElementId" style="@(isLoadingChart || chartError != null || !preferences.ShowVolume ? "display:none;" : "")"></div>
+                    @* Minigráfico navegador: todo el histórico y el tramo futuro (SPEC-21-01, RF-10) *@
+                    <div id="@navigatorElementId" class="company-chart-navigator" style="@(isLoadingChart || chartError != null ? "display:none;" : "")"></div>
 
-                    @if (!isLoadingChart && chartError == null)
+                    @if (!isLoadingChart && chartError == null && IsComparing)
                     {
-                        <div class="chart-legend mt-1">
-                            <span><span class="chart-legend-dot buy"></span>Compra</span>
-                            <span><span class="chart-legend-dot transfer"></span>Traspaso</span>
-                            <span><span class="chart-legend-dot sell"></span>Venta</span>
-                            <span><span class="chart-legend-dot dividend"></span>Dividendo</span>
+                        @* Leyenda y cifras del tramo visible (SPEC-05-04, RF-4 y RF-6) *@
+                        <div class="chart-comparison-panel mt-1">
+                            <span class="chart-comparison-item">
+                                <span class="chart-legend-dot comparison-main"></span>@company?.Name
+                                <strong class="@ReturnCss(comparison?.MainReturnPercent)">@FormatReturn(comparison?.MainReturnPercent)</strong>
+                            </span>
+                            <span class="chart-comparison-item">
+                                <span class="chart-legend-dot comparison-compared"></span>@comparedSeries!.Name
+                                <strong class="@ReturnCss(comparison?.ComparedReturnPercent)">@FormatReturn(comparison?.ComparedReturnPercent)</strong>
+                            </span>
+                            <span class="chart-comparison-item">
+                                @if (comparison?.Correlation is decimal correlation)
+                                {
+                                    @("Correlación")<strong class="ms-1">@correlation.ToString("0.00")</strong><span class="ms-1">(@comparison.CorrelationLabel)</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">Pocos datos para calcular la correlación</span>
+                                }
+                            </span>
+                            @if (ComparisonRangeLabel != null)
+                            {
+                                <span class="chart-comparison-item text-muted">@ComparisonRangeLabel</span>
+                            }
+                            @if (preferences.ShowMarks)
+                            {
+                                <span class="chart-legend-item is-static"><span class="chart-legend-dot mark"></span>Marca</span>
+                                <span class="chart-legend-item is-static"><span class="chart-legend-dot mark-global"></span>Marca global</span>
+                            }
+                        </div>
+                        <div class="small text-muted mt-1">
+                            Base 100 en el primer periodo visible. Rentabilidad y correlación (de las rentabilidades de cada periodo) del tramo visible.
                         </div>
                     }
+                    else if (!isLoadingChart && chartError == null)
+                    {
+                        @* Pulsar un tipo de operación lo oculta o lo muestra (SPEC-05-03, RF-7); las marcas van con su interruptor *@
+                        <div class="chart-legend mt-1">
+                            @foreach (var item in LegendItems)
+                            {
+                                <button type="button" class="chart-legend-item @(hiddenKinds.Contains(item.Kind) ? "is-hidden" : "")"
+                                        title="@(hiddenKinds.Contains(item.Kind) ? "Mostrar" : "Ocultar") @item.Label.ToLowerInvariant() en el gráfico"
+                                        @onclick="() => ToggleLegendKindAsync(item.Kind)">
+                                    <span class="chart-legend-dot @item.Css"></span>@item.Label
+                                </button>
+                            }
+                            <span class="chart-legend-item is-static"><span class="chart-legend-dot mark"></span>Marca</span>
+                            <span class="chart-legend-item is-static"><span class="chart-legend-dot mark-global"></span>Marca global</span>
+                            <span class="chart-legend-item is-static" title="Hueco: pendiente · Relleno: cobrado"><span class="chart-legend-dot dividend-payment"></span>Pago de dividendo</span>
+                        </div>
+                    }
+
+                    @* ---------- Panel de marcas (SPEC-05-03, RF-12) ---------- *@
+                    <div class="chart-marks-panel mt-2">
+                        <button type="button" class="btn btn-link btn-sm p-0" @onclick="() => marksPanelOpen = !marksPanelOpen">
+                            <i class="bi @(marksPanelOpen ? "bi-chevron-down" : "bi-chevron-right") me-1"></i>Marcas (@marks.Count)
+                        </button>
+                        @if (marksPanelOpen)
+                        {
+                            @if (!string.IsNullOrEmpty(markPanelError))
+                            {
+                                <div class="alert alert-danger py-1 px-2 small mt-2 mb-0">@markPanelError</div>
+                            }
+                            @if (marks.Count == 0)
+                            {
+                                <div class="small text-muted mt-1">No hay marcas. Usa «Añadir marca» para crear una.</div>
+                            }
+                            else
+                            {
+                                <table class="table table-sm align-middle mt-1 mb-0 chart-marks-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Fecha</th>
+                                            <th>Tipo</th>
+                                            <th>Descripción</th>
+                                            <th class="text-center">Activa</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var mark in marks)
+                                        {
+                                            <tr class="@(mark.IsActive ? "" : "text-muted")">
+                                                <td class="text-nowrap">@mark.Date.ToString("dd/MM/yyyy")</td>
+                                                <td><span class="mark-type @(mark.IsGlobal ? "global" : "company")">@(mark.IsGlobal ? "Global" : "Empresa")</span></td>
+                                                <td>@mark.Description</td>
+                                                <td class="text-center">
+                                                    <div class="form-check form-switch d-inline-block mb-0">
+                                                        <input class="form-check-input" type="checkbox" checked="@mark.IsActive"
+                                                               title="@(mark.IsActive ? "Desactivar" : "Activar") la marca"
+                                                               @onchange="e => SetMarkActiveAsync(mark, (bool)e.Value!)" />
+                                                    </div>
+                                                </td>
+                                                <td class="text-end text-nowrap">
+                                                    @if (confirmDeleteMarkId == mark.Id)
+                                                    {
+                                                        <span class="small me-1">@(mark.IsGlobal ? "Se borrará en todas las empresas. ¿Borrar?" : "¿Borrar la marca?")</span>
+                                                        <button type="button" class="btn btn-sm btn-danger py-0" @onclick="() => DeleteMarkAsync(mark.Id)">Sí</button>
+                                                        <button type="button" class="btn btn-sm btn-outline-secondary py-0" @onclick="() => confirmDeleteMarkId = null">No</button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button type="button" class="btn btn-sm btn-link py-0" title="Editar" @onclick="() => OpenMarkForm(mark)">
+                                                            <i class="bi bi-pencil"></i>
+                                                        </button>
+                                                        <button type="button" class="btn btn-sm btn-link text-danger py-0" title="Borrar" @onclick="() => confirmDeleteMarkId = mark.Id">
+                                                            <i class="bi bi-trash"></i>
+                                                        </button>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        }
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="CloseAsync">Cerrar</button>
@@ -318,9 +599,39 @@
     private const string LayerAverage = "average";
     private const string LayerCandles = "candles";
     private const string LayerVolume = "volume";
+    private const string LayerMarks = "marks";
+
+    // Leyenda que filtra los tipos de operación (SPEC-05-03, RF-7): se vacía al abrir el modal
+    private static readonly (string Kind, string Css, string Label)[] LegendItems =
+    {
+        ("Buy", "buy", "Compra"),
+        ("Sell", "sell", "Venta"),
+        ("Dividend", "dividend", "Dividendo"),
+        ("Transfer", "transfer", "Traspaso")
+    };
+    private readonly HashSet<string> hiddenKinds = new();
+
+    // Marcas del gráfico (SPEC-05-03): de la empresa y globales, activas e inactivas
+    private List<ChartMark> marks = new();
+    private bool markFormOpen;
+    private int? editingMarkId;
+    private ChartMarkInput markInput = new();
+    private string? markError;
+    private bool isSavingMark;
+    private bool marksPanelOpen;
+    private int? confirmDeleteMarkId;
+    private string? markPanelError;
+
+    /// <summary>Tramo visible del gráfico en milisegundos (companyChart.getView)</summary>
+    private sealed class ChartView
+    {
+        public long? Start { get; set; }
+        public long? End { get; set; }
+    }
 
     private readonly string chartElementId = $"company-chart-{Guid.NewGuid():N}";
     private string volumeElementId => chartElementId + "-volume";
+    private string navigatorElementId => chartElementId + "-nav";
 
     // El modal usa el mismo DbContext que el resto de la app. Antes tenía uno propio y eso dejaba
     // datos desfasados en el contexto principal: una venta hecha desde el gráfico y deshecha luego en
@@ -332,6 +643,24 @@
     private readonly SemaphoreSlim dataLock = new(1, 1);
     private CancellationTokenSource? liveCts;
 
+    // Descargas en segundo plano (SPEC-05-02): histórico diario antiguo y barras de una hora
+    private CancellationTokenSource? backfillCts;
+    private CancellationTokenSource? hourlyCts;
+    private bool isBackfilling;
+    private int backfillRun; // cambia en cada arranque o cancelación: un bucle antiguo no toca el estado del nuevo
+    private string? backfillMessage;
+    private string? hourlyBackfillMessage;
+    private string? backfillError;
+
+    private static readonly (ChartGranularity Value, string Label)[] GranularityOptions =
+    {
+        (ChartGranularity.Hourly, "Horas"),
+        (ChartGranularity.Daily, "Diario"),
+        (ChartGranularity.Weekly, "Semanal"),
+        (ChartGranularity.Monthly, "Mensual"),
+        (ChartGranularity.Yearly, "Anual")
+    };
+
     private bool isVisible;
     private bool isLoadingChart;
     private string? chartError;
@@ -340,8 +669,33 @@
     private ChartGranularity granularity = ChartGranularity.Daily;
     private ChartPreferences preferences = new();
     private List<PriceHistoryPoint> points = new();
+    private DateTime? viewStart;
+    private DateTime? viewEnd;
     private List<ChartMarker> markers = new();
-    private int availableShares;
+
+    // Líneas del calendario de dividendos de la empresa, como «Pago de dividendo» (SPEC-21-01, RF-9)
+    private List<DividendChartMark> dividendMarks = new();
+
+    // Comparación con otra empresa o un índice (SPEC-05-04). No se recuerda entre aperturas (RF-3)
+    private bool comparePickerOpen;
+    private List<CompanyDetail> compareCompanies = new();
+    private List<BenchmarkIndexSummary> compareIndices = new();
+    private ChartSeriesRef? comparedSeries;
+    private List<PriceHistoryPoint> comparedPoints = new();
+    private ComparisonResult? comparison;
+    private long? comparisonStartMs;
+    private long? comparisonEndMs;
+    private bool isLoadingComparison;
+    private string? comparisonLoadingMessage;
+    private string? comparisonWarning;
+    private string? comparedBackfillMessage;
+    private CancellationTokenSource? comparedBackfillCts;
+    private Task? backfillTask;
+    private bool isComparedBackfilling;
+    private DotNetObjectReference<CompanyChartModal>? dotNetRef;
+
+    private bool IsComparing => comparedSeries != null;
+    private decimal availableShares;
     private string baseCurrencyCode = CurrencyFormatter.DefaultCurrency;
     private bool operated;
 
@@ -356,16 +710,23 @@
     // Mini-formulario
     private string? tradeType;
     private DateTime tradeDate = DateTime.Today;
-    private int tradeShares = 1;
+    // Acciones con hasta 2 decimales (SPEC-02-08)
+    private decimal tradeShares = 1;
     private decimal tradePrice;
     private decimal tradeCommission;
     private decimal? tradeExchangeRate;
+    private List<BankAccount> tradeBankAccounts = new();
+    private string? defaultTradeBankAccountName;
+    private string tradeBankAccountName = string.Empty;
     private bool followLivePrice = true;
     private bool isSaving;
     private string? tradeError;
     private string? successMessage;
 
     private string CurrencyCode => CurrencyFormatter.Normalize(company?.CurrencyCode);
+
+    // Símbolo para el histórico: el resuelto por el precio en vivo (p. ej. ACS.MC) evita repetir la prueba de sufijos
+    private string HistorySymbol => resolvedSymbol ?? company?.Ticker ?? string.Empty;
 
     private bool IsBaseCurrency => string.Equals(CurrencyCode, baseCurrencyCode, StringComparison.OrdinalIgnoreCase);
 
@@ -377,7 +738,7 @@
 
     private string? TradeBlockReason => tradeType == null
         ? null
-        : OperationService.GetQuickTradeBlockReason(tradeType, tradeDate, marketState, availableShares);
+        : OperationService.GetQuickTradeBlockReason(tradeType, tradeDate, marketState, availableShares, tradeBankAccounts.Count > 0);
 
     private string MarketLabel => marketState switch
     {
@@ -411,8 +772,18 @@
         tradeType = null;
         successMessage = null;
         historyWarning = null;
+        backfillMessage = null;
+        hourlyBackfillMessage = null;
+        backfillError = null;
         chartError = null;
         operated = false;
+        hiddenKinds.Clear();
+        markFormOpen = false;
+        editingMarkId = null;
+        markError = null;
+        markPanelError = null;
+        confirmDeleteMarkId = null;
+        ResetComparison();
         isVisible = true;
         isLoadingChart = true;
         StateHasChanged();
@@ -429,6 +800,9 @@
         await RenderChartAsync();
         await RefreshQuoteAsync(CancellationToken.None);
         StartLiveLoop();
+
+        // El histórico antiguo llega después, sin hacer esperar al primer dibujo (SPEC-05-02, RF-2)
+        StartBackfill();
     }
 
     // ---------------------------------------------------------------- Ciclo de vida
@@ -476,6 +850,11 @@
             liveCts = null;
         }
 
+        // Las descargas en segundo plano se cancelan; lo ya guardado se queda (SPEC-05-02, RF-5)
+        CancelBackfill();
+        CancelHourly();
+        CancelComparedBackfill();
+
         try
         {
             await JS.InvokeVoidAsync("companyChart.destroy", chartElementId);
@@ -507,6 +886,8 @@
     public async ValueTask DisposeAsync()
     {
         await StopAsync();
+        dotNetRef?.Dispose();
+        dotNetRef = null;
     }
 
     /// <summary>
@@ -543,20 +924,33 @@
 
         markers = await OperationService.GetChartMarkersAsync(company.Name);
         availableShares = await OperationService.GetAvailableSharesAsync(company.Name);
+        marks = await ChartMarkService.GetForCompanyAsync(company.Id);
+        dividendMarks = await DividendService.GetChartMarksAsync(company.Id);
     }
 
-    private async Task LoadHistoryAsync(bool forceRefresh)
+    /// <summary>
+    /// Carga el histórico diario (o su agregación) de la temporalidad activa. Con <paramref name="cacheOnly"/>
+    /// se lee solo la caché, sin Yahoo: cambio de temporalidad y bloques del segundo plano (SPEC-05-02).
+    /// </summary>
+    private async Task LoadHistoryAsync(bool forceRefresh, bool cacheOnly = false)
     {
         if (company == null)
         {
             return;
         }
 
-        historyWarning = null;
         try
         {
-            var result = await PriceHistoryService.GetHistoryWithStatusAsync(company.Id, company.Ticker, granularity, forceRefresh);
-            points = result.Points;
+            if (cacheOnly)
+            {
+                ApplyHistoryResult(await PriceHistoryService.GetCachedHistoryAsync(company.Id, granularity));
+                chartError = points.Count > 0 ? null : "No hay histórico de cotización para este ticker.";
+                return;
+            }
+
+            historyWarning = null;
+            var result = await PriceHistoryService.GetHistoryWithStatusAsync(company.Id, HistorySymbol, granularity, forceRefresh);
+            ApplyHistoryResult(result);
 
             if (result.RefreshFailed && points.Count > 0)
             {
@@ -579,6 +973,49 @@
         }
     }
 
+    private void ApplyHistoryResult(PriceHistoryResult result)
+    {
+        points = result.Points;
+        viewStart = result.ViewStart;
+        viewEnd = result.ViewEnd;
+    }
+
+    /// <summary>
+    /// Carga las barras de una hora del último mes, o las que haya en memoria (SPEC-05-02, RF-9)
+    /// </summary>
+    private async Task LoadHourlyAsync(CancellationToken token)
+    {
+        if (company == null)
+        {
+            return;
+        }
+
+        historyWarning = null;
+        try
+        {
+            var result = await PriceHistoryService.GetHourlyAsync(company.Id, HistorySymbol, token);
+            ApplyHistoryResult(result);
+
+            chartError = points.Count > 0
+                ? null
+                : !result.RefreshFailed
+                    ? "Yahoo no ofrece barras horarias para este ticker."
+                    : HasInternet()
+                        ? "No se pudieron descargar las barras horarias de Yahoo Finance."
+                        : "Sin conexión a Internet: la vista de Horas necesita conexión.";
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al cargar las barras de una hora de {Company}", company.Name);
+            points = new();
+            chartError = "No se pudo conectar con Yahoo Finance.";
+        }
+    }
+
     private static bool HasInternet()
     {
         try
@@ -591,7 +1028,11 @@
         }
     }
 
-    private async Task RenderChartAsync()
+    /// <summary>
+    /// Dibuja el gráfico desde cero. Con <paramref name="keepView"/> conserva ese tramo en lugar del inicial
+    /// (cambio de capas, SPEC-05-03, RF-4).
+    /// </summary>
+    private async Task RenderChartAsync(ChartView? keepView = null)
     {
         isLoadingChart = false;
         StateHasChanged();
@@ -601,38 +1042,17 @@
             return;
         }
 
-        var payload = new
-        {
-            series = points.Select(p => new
-            {
-                x = new DateTimeOffset(p.Date).ToUnixTimeMilliseconds(),
-                o = p.Open,
-                h = p.High,
-                l = p.Low,
-                c = p.Close,
-                v = p.Volume
-            }),
-            markers = markers.Select(m => new
-            {
-                kind = m.Kind.ToString(),
-                date = new DateTimeOffset(m.Date.Date).ToUnixTimeMilliseconds(),
-                dateLabel = m.Date.ToString("dd/MM/yyyy"),
-                price = m.Price,
-                shares = m.Shares,
-                amount = m.Amount
-            }),
-            currentPrice = quote?.Price ?? company.LivePrice ?? (company.CurrentPrice > 0 ? company.CurrentPrice : (decimal?)null),
-            averagePrice = company.AveragePurchasePrice,
-            currencySymbol = CurrencyFormatter.Symbol(CurrencyCode),
-            showCandles = preferences.ShowCandles,
-            showVolume = preferences.ShowVolume,
-            showAverage = preferences.ShowAverage && HasPosition,
-            isDaily = granularity == ChartGranularity.Daily
-        };
-
         try
         {
-            await JS.InvokeVoidAsync("companyChart.render", chartElementId, volumeElementId, JsonSerializer.Serialize(payload));
+            dotNetRef ??= DotNetObjectReference.Create(this);
+            if (keepView != null && IsComparing)
+            {
+                // Las series en base 100 salen ya calculadas para el tramo que se va a ver
+                comparisonStartMs = keepView.Start;
+                comparisonEndMs = keepView.End;
+            }
+
+            await JS.InvokeVoidAsync("companyChart.render", chartElementId, volumeElementId, BuildChartPayload(keepView), navigatorElementId, dotNetRef);
 
             if (quote != null && granularity == ChartGranularity.Daily)
             {
@@ -652,6 +1072,127 @@
         }
     }
 
+    /// <summary>
+    /// Datos del gráfico en JSON para companyChart.render y companyChart.updateData
+    /// </summary>
+    private string BuildChartPayload(ChartView? keepView = null)
+    {
+        // Cada marcador y cada marca van a su periodo: primera barra del día en Horas, inicio de la semana,
+        // mes o año en las agregadas (SPEC-05-02, RF-11; SPEC-05-03, RF-10)
+        // Al comparar no se dibujan operaciones ni pagos de dividendo; las marcas sí (SPEC-05-04, RF-4b)
+        var chartMarkers = IsComparing
+            ? new List<ChartMarker>()
+            : PriceHistoryService.AlignMarkers(markers, points, granularity);
+        var chartMarks = preferences.ShowMarks
+            ? PriceHistoryService.AlignMarks(marks.Where(m => m.IsActive), points, granularity)
+            : new List<ChartMarkPoint>();
+
+        // Tramo futuro hasta 1 año o el pago pendiente más lejano, y pagos de dividendo (SPEC-21-01, RF-9 y RF-10)
+        var futureSessions = PriceHistoryService.BuildFutureSessions(points, granularity,
+            dividendMarks.Where(d => d.Status == DividendPaymentRules.StatusPending).Select(d => d.PaymentDate));
+        var dividendPoints = preferences.ShowMarks && !IsComparing
+            ? PriceHistoryService.AlignDividendMarks(dividendMarks, points, granularity)
+            : new List<DividendMarkPoint>();
+
+        var payload = new
+        {
+            series = points.Select(p => new
+            {
+                x = ToMs(p.Date),
+                o = p.Open,
+                h = p.High,
+                l = p.Low,
+                c = p.Close,
+                v = p.Volume,
+                tv = p.TradedValue
+            }),
+            markers = chartMarkers.Select(m => new
+            {
+                kind = m.Kind.ToString(),
+                date = ToMs(m.Date),
+                dateLabel = (m.OperationDate ?? m.Date).ToString("dd/MM/yyyy"),
+                price = m.Price,
+                shares = m.Shares,
+                amount = m.Amount
+            }),
+            currentPrice = quote?.Price ?? company?.LivePrice ?? (company?.CurrentPrice > 0 ? company.CurrentPrice : (decimal?)null),
+            averagePrice = company?.AveragePurchasePrice,
+            currencySymbol = CurrencyFormatter.Symbol(CurrencyCode),
+            showCandles = preferences.ShowCandles,
+            showVolume = preferences.ShowVolume,
+            showAverage = preferences.ShowAverage && HasPosition,
+            isDaily = granularity == ChartGranularity.Daily,
+            granularity = granularity.ToString(),
+            viewStart = viewStart.HasValue ? ToMs(viewStart.Value) : (long?)null,
+            viewEnd = viewEnd.HasValue ? ToMs(viewEnd.Value) : (long?)null,
+            marks = chartMarks.Select(k => new
+            {
+                id = k.Id,
+                date = ToMs(k.Date),
+                dateLabel = k.MarkDate.ToString("dd/MM/yyyy"),
+                description = k.Description,
+                isGlobal = k.IsGlobal
+            }),
+            showMarks = preferences.ShowMarks,
+            futureSessions = futureSessions.Select(ToMs),
+            dividendMarks = dividendPoints.Select(d => new
+            {
+                id = d.Id,
+                date = ToMs(d.Date),
+                paymentLabel = d.PaymentDate.ToString("dd/MM/yyyy"),
+                exLabel = d.ExDividendDate?.ToString("dd/MM/yyyy"),
+                status = d.Status,
+                totalText = d.TotalAmount.HasValue ? CurrencyFormatter.Format(d.TotalAmount.Value, d.CurrencyCode) : null,
+                isFuture = d.IsFuture
+            }),
+            hiddenKinds = hiddenKinds.ToArray(),
+            keepView = keepView == null ? null : new { start = keepView.Start, end = keepView.End },
+            comparison = BuildComparisonPayload()
+        };
+
+        return JsonSerializer.Serialize(payload);
+    }
+
+    /// <summary>
+    /// Añade al gráfico los datos nuevos (bloque del segundo plano) sin mover la vista (SPEC-05-02, RF-4)
+    /// </summary>
+    private async Task UpdateChartDataAsync()
+    {
+        if (company == null || !isVisible || isLoadingChart)
+        {
+            return;
+        }
+
+        // Si antes no había datos (o no se pudo dibujar), se dibuja desde cero
+        if (chartError != null || points.Count == 0)
+        {
+            chartError = points.Count > 0 ? null : chartError;
+            await RenderChartAsync();
+            return;
+        }
+
+        try
+        {
+            var updated = await JS.InvokeAsync<bool>("companyChart.updateData", chartElementId, BuildChartPayload());
+            if (!updated)
+            {
+                await RenderChartAsync();
+                return;
+            }
+
+            if (quote != null && granularity == ChartGranularity.Daily)
+            {
+                await JS.InvokeVoidAsync("companyChart.updateLive", chartElementId, quote.Price, TodayMs());
+            }
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "No se pudieron añadir los datos nuevos al gráfico");
+        }
+    }
+
+    private static long ToMs(DateTime date) => new DateTimeOffset(date).ToUnixTimeMilliseconds();
+
     private static long TodayMs() => new DateTimeOffset(DateTime.Today).ToUnixTimeMilliseconds();
 
     private async Task ChangeGranularityAsync(ChartGranularity newGranularity)
@@ -661,11 +1202,58 @@
             return;
         }
 
+        // La descarga de Horas se cancela al salir de Horas (RF-9); la del diario sigue
+        CancelHourly();
         granularity = newGranularity;
         isLoadingChart = true;
         StateHasChanged();
-        await RunExclusiveAsync(() => LoadHistoryAsync(false));
+
+        if (newGranularity == ChartGranularity.Hourly)
+        {
+            await ShowHourlyAsync(false);
+            return;
+        }
+
+        // El diario ya se refrescó al abrir: se lee de la caché, sin Yahoo
+        await RunExclusiveAsync(() => LoadHistoryAsync(false, cacheOnly: true));
+        await LoadComparedForGranularityAsync(CancellationToken.None);
         await RenderChartAsync();
+    }
+
+    /// <summary>
+    /// Dibuja Horas con el último mes y arranca la descarga del resto en segundo plano (SPEC-05-02, RF-9)
+    /// </summary>
+    private async Task ShowHourlyAsync(bool forceRefresh)
+    {
+        if (company == null)
+        {
+            return;
+        }
+
+        if (forceRefresh)
+        {
+            PriceHistoryService.ClearHourly(company.Id);
+        }
+
+        hourlyCts = new CancellationTokenSource();
+        var token = hourlyCts.Token;
+        try
+        {
+            await LoadHourlyAsync(token);
+            await LoadComparedForGranularityAsync(token);
+        }
+        catch (OperationCanceledException)
+        {
+            isLoadingChart = false;
+            return;
+        }
+
+        await RenderChartAsync();
+
+        if (points.Count > 0 && !PriceHistoryService.GetCachedHourly(company.Id).IsComplete)
+        {
+            _ = HourlyLoopAsync(token);
+        }
     }
 
     private async Task ReloadHistoryAsync()
@@ -676,9 +1264,265 @@
         }
 
         isLoadingChart = true;
+        backfillError = null;
         StateHasChanged();
-        await RunExclusiveAsync(() => LoadHistoryAsync(true));
-        await RenderChartAsync();
+
+        if (granularity == ChartGranularity.Hourly)
+        {
+            // También se refresca el diario (RF-13); en pantalla se quedan las barras de una hora
+            CancelHourly();
+            await RunExclusiveAsync(async () =>
+            {
+                var daily = await PriceHistoryService.GetHistoryWithStatusAsync(company!.Id, HistorySymbol, ChartGranularity.Daily, true);
+                if (daily.RefreshFailed)
+                {
+                    historyWarning = "No se pudo descargar el histórico diario de Yahoo Finance; se conserva el guardado.";
+                }
+            });
+            await ShowHourlyAsync(true);
+        }
+        else
+        {
+            await RunExclusiveAsync(() => LoadHistoryAsync(true));
+            await LoadComparedForGranularityAsync(CancellationToken.None);
+            await RenderChartAsync();
+        }
+
+        // Si el histórico antiguo no está completo, se reanuda su descarga
+        StartBackfill();
+    }
+
+    private async Task ResetViewAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("companyChart.resetView", chartElementId);
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "No se pudo volver a la vista inicial del gráfico");
+        }
+    }
+
+    // ---------------------------------------------------------------- Segundo plano (SPEC-05-02)
+
+    private void StartBackfill()
+    {
+        if (isBackfilling || company == null || string.IsNullOrWhiteSpace(company.Ticker) || !isActive)
+        {
+            return;
+        }
+
+        CancelBackfill();
+        isBackfilling = true;
+        backfillCts = new CancellationTokenSource();
+        backfillTask = BackfillLoopAsync(++backfillRun, backfillCts.Token);
+    }
+
+    private void CancelBackfill()
+    {
+        if (backfillCts != null)
+        {
+            backfillCts.Cancel();
+            backfillCts.Dispose();
+            backfillCts = null;
+        }
+
+        backfillRun++;
+        isBackfilling = false;
+        backfillMessage = null;
+    }
+
+    private void CancelHourly()
+    {
+        if (hourlyCts != null)
+        {
+            hourlyCts.Cancel();
+            hourlyCts.Dispose();
+            hourlyCts = null;
+        }
+
+        hourlyBackfillMessage = null;
+    }
+
+    /// <summary>
+    /// Completa hacia atrás el histórico diario por bloques de 10 años: descarga fuera del semáforo y
+    /// guarda dentro, con el DbContext compartido (SPEC-05-02, RF-2, RF-4 y RF-5)
+    /// </summary>
+    private async Task BackfillLoopAsync(int run, CancellationToken token)
+    {
+        if (company == null)
+        {
+            return;
+        }
+
+        var companyId = company.Id;
+        try
+        {
+            HistoryBackfillState? state = null;
+            await RunExclusiveAsync(async () => state = await PriceHistoryService.GetBackfillStateAsync(companyId));
+            if (state == null || state.IsComplete || state.OldestDate == null)
+            {
+                return;
+            }
+
+            var cursor = state.OldestDate.Value;
+            var oldestShown = cursor;
+            while (!token.IsCancellationRequested)
+            {
+                backfillMessage = $"Descargando histórico anterior… (desde {oldestShown.Year})";
+                await InvokeAsync(StateHasChanged);
+
+                var block = await PriceHistoryService.FetchOlderDailyBlockAsync(HistorySymbol, cursor, token);
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                if (block.Failed)
+                {
+                    backfillError = $"No se pudo descargar el histórico anterior a {cursor:dd/MM/yyyy}; se reintentará la próxima vez.";
+                    return;
+                }
+
+                var saved = false;
+                var reloaded = false;
+                await RunExclusiveAsync(async () =>
+                {
+                    await PriceHistoryService.SaveDailyBlockAsync(companyId, block);
+                    saved = true;
+
+                    // Se recalcula la temporalidad activa con los datos nuevos (Horas no sale del diario)
+                    if (granularity != ChartGranularity.Hourly && !isLoadingChart)
+                    {
+                        await LoadHistoryAsync(false, cacheOnly: true);
+                        reloaded = true;
+                    }
+                });
+
+                if (!saved || token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                if (reloaded && granularity != ChartGranularity.Hourly)
+                {
+                    await UpdateChartDataAsync();
+                }
+
+                if (block.ReachedStart)
+                {
+                    return;
+                }
+
+                cursor = block.BlockStart;
+                if (block.OldestDate.HasValue)
+                {
+                    oldestShown = block.OldestDate.Value;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Modal cerrado: lo ya guardado se queda y se reanuda en la próxima apertura
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al descargar el histórico anterior de {Company}", company?.Name);
+            backfillError = "No se pudo completar el histórico anterior; se reintentará la próxima vez.";
+        }
+        finally
+        {
+            if (run == backfillRun)
+            {
+                isBackfilling = false;
+                backfillMessage = null;
+            }
+
+            if (isVisible)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Completa en memoria las barras de una hora hasta el límite de Yahoo (SPEC-05-02, RF-9)
+    /// </summary>
+    private async Task HourlyLoopAsync(CancellationToken token)
+    {
+        if (company == null)
+        {
+            return;
+        }
+
+        var companyId = company.Id;
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                var current = PriceHistoryService.GetCachedHourly(companyId);
+                if (current.IsComplete || current.OldestDate == null)
+                {
+                    return;
+                }
+
+                hourlyBackfillMessage = $"Descargando horas anteriores… (desde {current.OldestDate.Value:dd/MM/yyyy})";
+                await InvokeAsync(StateHasChanged);
+
+                var block = await PriceHistoryService.FetchOlderHourlyBlockAsync(companyId, HistorySymbol, token);
+                if (token.IsCancellationRequested || granularity != ChartGranularity.Hourly)
+                {
+                    return;
+                }
+
+                if (block.Failed)
+                {
+                    backfillError = "No se pudieron descargar las horas anteriores; se reintentará al volver a Horas.";
+                    return;
+                }
+
+                ApplyHistoryResult(PriceHistoryService.GetCachedHourly(companyId));
+
+                // La serie comparada se amplía con el mismo tramo de horas (SPEC-05-04, RF-5)
+                var series = comparedSeries;
+                if (series != null)
+                {
+                    await PriceHistoryService.FetchOlderSeriesHourlyBlockAsync(series, token);
+                    if (comparedSeries == series)
+                    {
+                        comparedPoints = PriceHistoryService.GetCachedSeriesHourly(series).Points;
+                    }
+                }
+
+                await UpdateChartDataAsync();
+
+                if (block.ReachedStart)
+                {
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Se salió de Horas o se cerró el modal
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al descargar las horas anteriores de {Company}", company?.Name);
+        }
+        finally
+        {
+            if (!token.IsCancellationRequested)
+            {
+                hourlyBackfillMessage = null;
+            }
+
+            if (isVisible)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
     }
 
     private async Task ToggleLayerAsync(string layer, bool value)
@@ -688,7 +1532,11 @@
             case LayerAverage: preferences.ShowAverage = value; break;
             case LayerCandles: preferences.ShowCandles = value; break;
             case LayerVolume: preferences.ShowVolume = value; break;
+            case LayerMarks: preferences.ShowMarks = value; break;
         }
+
+        // El tramo que se está mirando se conserva al redibujar (SPEC-05-03, RF-4)
+        var view = await GetChartViewAsync();
 
         await RunExclusiveAsync(async () =>
         {
@@ -700,7 +1548,582 @@
         });
 
         // Las capas solo cambian el dibujo: no se vuelve a consultar el histórico
-        await RenderChartAsync();
+        await RenderChartAsync(view);
+    }
+
+    // ---------------------------------------------------------------- Comparación (SPEC-05-04)
+
+    private void ResetComparison()
+    {
+        CancelComparedBackfill();
+        comparePickerOpen = false;
+        comparedSeries = null;
+        comparedPoints = new();
+        comparison = null;
+        comparisonStartMs = null;
+        comparisonEndMs = null;
+        isLoadingComparison = false;
+        comparisonWarning = null;
+    }
+
+    private void CancelComparedBackfill()
+    {
+        if (comparedBackfillCts != null)
+        {
+            comparedBackfillCts.Cancel();
+            comparedBackfillCts.Dispose();
+            comparedBackfillCts = null;
+        }
+
+        isComparedBackfilling = false;
+        comparedBackfillMessage = null;
+    }
+
+    /// <summary>
+    /// Abre el selector con las otras empresas (con ticker) y los índices dados de alta (RF-3)
+    /// </summary>
+    private async Task OpenComparePickerAsync()
+    {
+        if (company == null)
+        {
+            return;
+        }
+
+        comparisonWarning = null;
+        await RunExclusiveAsync(async () =>
+        {
+            var companies = await CompanyService.GetAllAsync();
+            compareCompanies = companies
+                .Where(c => c.Id != company.Id && !string.IsNullOrWhiteSpace(c.Ticker))
+                .OrderBy(c => c.Name)
+                .ToList();
+            compareIndices = await BenchmarkIndexService.GetAllAsync();
+        });
+
+        if (compareCompanies.Count == 0 && compareIndices.Count == 0)
+        {
+            comparisonWarning = "No hay otras empresas con ticker ni índices para comparar. Da de alta índices en «Índices».";
+            return;
+        }
+
+        comparePickerOpen = true;
+    }
+
+    private async Task OnCompareSelectedAsync(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        if (string.IsNullOrEmpty(value) || value.Length < 3 || !int.TryParse(value[2..], out var id))
+        {
+            return;
+        }
+
+        ChartSeriesRef? series = null;
+        if (value.StartsWith("C:"))
+        {
+            var other = compareCompanies.FirstOrDefault(c => c.Id == id);
+            if (other != null)
+            {
+                series = ChartSeriesRef.ForCompany(other.Id, other.Ticker!, other.Name);
+            }
+        }
+        else
+        {
+            var index = compareIndices.FirstOrDefault(i => i.Id == id);
+            if (index != null)
+            {
+                series = ChartSeriesRef.ForBenchmark(index.Id, index.Symbol, index.Name);
+            }
+        }
+
+        if (series != null)
+        {
+            await StartComparisonAsync(series);
+        }
+    }
+
+    /// <summary>
+    /// Carga la serie elegida (de la caché o de Yahoo si no la hay), la superpone en base 100 con el tramo que se estaba
+    /// mirando y, si su histórico no está completo, lo completa detrás del de la empresa (RF-2 a RF-4)
+    /// </summary>
+    private async Task StartComparisonAsync(ChartSeriesRef series)
+    {
+        comparePickerOpen = false;
+        comparisonWarning = null;
+        CancelComparedBackfill();
+        isLoadingComparison = true;
+        comparisonLoadingMessage = $"Cargando {series.Name}…";
+        StateHasChanged();
+
+        var view = await GetChartViewAsync();
+        var loaded = await LoadComparedPointsAsync(series, allowDownload: true, CancellationToken.None);
+        isLoadingComparison = false;
+
+        if (!isActive)
+        {
+            return;
+        }
+
+        if (!loaded)
+        {
+            StateHasChanged();
+            return;
+        }
+
+        comparedSeries = series;
+        await RenderChartAsync(view);
+        StartComparedBackfill(series);
+    }
+
+    private async Task ClearComparisonAsync()
+    {
+        var view = await GetChartViewAsync();
+        ResetComparison();
+
+        // Vuelven velas, volumen, operaciones y dividendos en el mismo tramo (RF-4b)
+        await RenderChartAsync(view);
+    }
+
+    /// <summary>
+    /// Puntos de la serie comparada en la temporalidad activa: barras de una hora en memoria en Horas; el resto, del
+    /// histórico guardado (con <paramref name="allowDownload"/>, de Yahoo si está vacío o tiene más de 12 horas).
+    /// Devuelve false (con aviso) si no hay datos.
+    /// </summary>
+    private async Task<bool> LoadComparedPointsAsync(ChartSeriesRef series, bool allowDownload, CancellationToken token)
+    {
+        try
+        {
+            PriceHistoryResult? result = null;
+            if (granularity == ChartGranularity.Hourly)
+            {
+                result = await PriceHistoryService.GetSeriesHourlyAsync(series, token);
+            }
+            else
+            {
+                await RunExclusiveAsync(async () =>
+                {
+                    result = allowDownload
+                        ? await PriceHistoryService.GetSeriesHistoryWithStatusAsync(series, granularity, false)
+                        : await PriceHistoryService.GetCachedSeriesHistoryAsync(series, granularity);
+                });
+            }
+
+            if (result == null || result.Points.Count == 0)
+            {
+                comparisonWarning = HasInternet()
+                    ? $"No hay cotización de {series.Name} en Yahoo Finance para esta temporalidad; se muestra la empresa sola."
+                    : $"Sin conexión a Internet: no se pudo cargar {series.Name}.";
+                return false;
+            }
+
+            comparedPoints = result.Points;
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al cargar la serie comparada {Series}", series.Name);
+            comparisonWarning = $"No se pudo cargar {series.Name}; se muestra la empresa sola.";
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Al cambiar de temporalidad o recargar, la serie comparada se lee en la misma temporalidad (RF-5). Si no tiene
+    /// datos en ella, se quita la comparación con un aviso.
+    /// </summary>
+    private async Task LoadComparedForGranularityAsync(CancellationToken token)
+    {
+        var series = comparedSeries;
+        if (series == null)
+        {
+            return;
+        }
+
+        // El tramo de la nueva temporalidad es el inicial: la base se calcula en él
+        comparisonStartMs = viewStart.HasValue ? ToMs(viewStart.Value) : null;
+        comparisonEndMs = viewEnd.HasValue ? ToMs(viewEnd.Value) : null;
+
+        // Con la caché vacía (se empezó a comparar en Horas) o de más de 12 horas, se descarga como al comparar
+        if (!await LoadComparedPointsAsync(series, allowDownload: true, token))
+        {
+            ResetComparison();
+            comparisonWarning ??= $"No hay cotización de {series.Name} para esta temporalidad.";
+            return;
+        }
+
+        if (granularity != ChartGranularity.Hourly && !isComparedBackfilling)
+        {
+            StartComparedBackfill(series);
+        }
+    }
+
+    /// <summary>
+    /// Alinea la serie comparada con los periodos de la empresa y calcula base 100, rentabilidades y correlación del
+    /// tramo visible con <see cref="ChartComparison"/> (RF-4 a RF-6)
+    /// </summary>
+    private void RecalculateComparison()
+    {
+        if (comparedSeries == null || points.Count == 0)
+        {
+            comparison = null;
+            return;
+        }
+
+        var aligned = ChartComparison.Align(points, comparedPoints);
+        var mainCloses = points.Select(p => (decimal?)p.Close).ToList();
+
+        var startIndex = 0;
+        var endIndex = points.Count - 1;
+        if (comparisonStartMs.HasValue)
+        {
+            var i = points.FindIndex(p => ToMs(p.Date) >= comparisonStartMs.Value);
+            startIndex = i < 0 ? points.Count - 1 : i;
+        }
+
+        if (comparisonEndMs.HasValue)
+        {
+            endIndex = points.FindLastIndex(p => ToMs(p.Date) <= comparisonEndMs.Value);
+            if (endIndex < startIndex)
+            {
+                endIndex = startIndex;
+            }
+        }
+
+        comparison = ChartComparison.Compute(mainCloses, aligned, startIndex, endIndex);
+        comparisonRange = (points[startIndex].Date, points[endIndex].Date);
+    }
+
+    private (DateTime Start, DateTime End)? comparisonRange;
+
+    private string? ComparisonRangeLabel => comparisonRange == null
+        ? null
+        : $"Del {FormatPeriod(comparisonRange.Value.Start)} al {FormatPeriod(comparisonRange.Value.End)}";
+
+    private string FormatPeriod(DateTime date) => granularity switch
+    {
+        ChartGranularity.Hourly => date.ToString("dd/MM/yyyy HH:mm"),
+        ChartGranularity.Monthly => date.ToString("MM/yyyy"),
+        ChartGranularity.Yearly => date.ToString("yyyy"),
+        _ => date.ToString("dd/MM/yyyy")
+    };
+
+    private static string FormatReturn(decimal? percent) => percent.HasValue
+        ? percent.Value.ToString("+0.00;-0.00;0.00") + " %"
+        : "—";
+
+    private static string ReturnCss(decimal? percent) => percent switch
+    {
+        > 0 => "text-success",
+        < 0 => "text-danger",
+        _ => string.Empty
+    };
+
+    /// <summary>
+    /// Datos de la comparación para el JS (null sin comparación): nombres y las dos series en base 100
+    /// </summary>
+    private object? BuildComparisonPayload()
+    {
+        if (comparedSeries == null)
+        {
+            return null;
+        }
+
+        RecalculateComparison();
+        return new
+        {
+            mainName = company?.Name ?? string.Empty,
+            comparedName = comparedSeries.Name,
+            main = comparison?.Main ?? new List<decimal?>(),
+            compared = comparison?.Compared ?? new List<decimal?>()
+        };
+    }
+
+    /// <summary>
+    /// El gráfico avisa del tramo visible (con una espera de 250 ms) al hacer zoom, desplazarse o mover el navegador:
+    /// se recalcula la base 100 en el nuevo primer periodo, rentabilidades y correlación (RF-4 y RF-6)
+    /// </summary>
+    [JSInvokable]
+    public async Task OnComparisonRangeChanged(long startMs, long endMs)
+    {
+        if (comparedSeries == null || !isVisible)
+        {
+            return;
+        }
+
+        comparisonStartMs = startMs;
+        comparisonEndMs = endMs;
+        RecalculateComparison();
+        if (comparison == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("companyChart.setComparison", chartElementId,
+                JsonSerializer.Serialize(new { main = comparison.Main, compared = comparison.Compared }));
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "No se pudo redibujar la comparación");
+        }
+
+        StateHasChanged();
+    }
+
+    private void StartComparedBackfill(ChartSeriesRef series)
+    {
+        CancelComparedBackfill();
+        comparedBackfillCts = new CancellationTokenSource();
+        isComparedBackfilling = true;
+        _ = ComparedBackfillLoopAsync(series, comparedBackfillCts.Token);
+    }
+
+    /// <summary>
+    /// Completa hacia atrás el histórico diario de la serie comparada, después del de la empresa abierta (D11): mismos
+    /// bloques de 10 años, descarga fuera del semáforo y guardado dentro. Cada bloque amplía la comparación sin mover la vista.
+    /// </summary>
+    private async Task ComparedBackfillLoopAsync(ChartSeriesRef series, CancellationToken token)
+    {
+        try
+        {
+            // Primero el histórico de la empresa abierta
+            if (backfillTask != null)
+            {
+                await backfillTask;
+            }
+
+            HistoryBackfillState? state = null;
+            await RunExclusiveAsync(async () => state = await PriceHistoryService.GetSeriesBackfillStateAsync(series));
+            if (state == null || state.IsComplete || state.OldestDate == null)
+            {
+                return;
+            }
+
+            var cursor = state.OldestDate.Value;
+            var oldestShown = cursor;
+            while (!token.IsCancellationRequested && comparedSeries == series)
+            {
+                comparedBackfillMessage = $"Descargando histórico anterior de {series.Name}… (desde {oldestShown.Year})";
+                await InvokeAsync(StateHasChanged);
+
+                var block = await PriceHistoryService.FetchOlderDailyBlockAsync(series.Symbol, cursor, token);
+                if (token.IsCancellationRequested || comparedSeries != series)
+                {
+                    return;
+                }
+
+                if (block.Failed)
+                {
+                    backfillError = $"No se pudo descargar el histórico anterior de {series.Name}; se reintentará en la próxima comparación.";
+                    return;
+                }
+
+                var saved = false;
+                var reloaded = false;
+                await RunExclusiveAsync(async () =>
+                {
+                    await PriceHistoryService.SaveSeriesDailyBlockAsync(series, block);
+                    saved = true;
+
+                    if (granularity != ChartGranularity.Hourly && !isLoadingChart && comparedSeries == series)
+                    {
+                        var result = await PriceHistoryService.GetCachedSeriesHistoryAsync(series, granularity);
+                        comparedPoints = result.Points;
+                        reloaded = true;
+                    }
+                });
+
+                if (!saved || token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                if (reloaded)
+                {
+                    await InvokeAsync(UpdateChartDataAsync);
+                }
+
+                if (block.ReachedStart)
+                {
+                    return;
+                }
+
+                cursor = block.BlockStart;
+                if (block.OldestDate.HasValue)
+                {
+                    oldestShown = block.OldestDate.Value;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Comparación quitada o modal cerrado: lo guardado se queda
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al descargar el histórico anterior de {Series}", series.Name);
+        }
+        finally
+        {
+            if (!token.IsCancellationRequested)
+            {
+                isComparedBackfilling = false;
+                comparedBackfillMessage = null;
+            }
+
+            if (isVisible)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private async Task<ChartView?> GetChartViewAsync()
+    {
+        try
+        {
+            return await JS.InvokeAsync<ChartView?>("companyChart.getView", chartElementId);
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "No se pudo leer el tramo visible del gráfico");
+            return null;
+        }
+    }
+
+    private async Task ToggleLegendKindAsync(string kind)
+    {
+        if (!hiddenKinds.Remove(kind))
+        {
+            hiddenKinds.Add(kind);
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("companyChart.setHiddenKinds", chartElementId, JsonSerializer.Serialize(hiddenKinds));
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "No se pudo filtrar la leyenda del gráfico");
+        }
+    }
+
+    // ---------------------------------------------------------------- Marcas (SPEC-05-03)
+
+    private void OpenMarkForm(ChartMark? mark)
+    {
+        // El formulario edita una copia, nunca la entidad
+        editingMarkId = mark?.Id;
+        markInput = mark == null
+            ? new ChartMarkInput { Date = DateTime.Today }
+            : new ChartMarkInput { Date = mark.Date, Description = mark.Description, IsGlobal = mark.IsGlobal };
+        markError = null;
+        confirmDeleteMarkId = null;
+        markFormOpen = true;
+    }
+
+    private void CancelMarkForm()
+    {
+        markFormOpen = false;
+        editingMarkId = null;
+        markError = null;
+    }
+
+    private async Task SaveMarkAsync()
+    {
+        if (company == null || isSavingMark)
+        {
+            return;
+        }
+
+        isSavingMark = true;
+        markError = null;
+        try
+        {
+            ChartMarkResult? result = null;
+            await RunExclusiveAsync(async () =>
+            {
+                result = editingMarkId.HasValue
+                    ? await ChartMarkService.UpdateAsync(editingMarkId.Value, company.Id, markInput)
+                    : await ChartMarkService.CreateAsync(company.Id, markInput);
+
+                if (result.Success)
+                {
+                    marks = await ChartMarkService.GetForCompanyAsync(company.Id);
+                }
+            });
+
+            if (result == null || !result.Success)
+            {
+                markError = result?.ErrorMessage ?? "No se pudo guardar la marca.";
+                return;
+            }
+
+            markFormOpen = false;
+            editingMarkId = null;
+            await UpdateChartDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al guardar una marca del gráfico");
+            markError = "No se pudo guardar la marca. No se ha modificado nada.";
+        }
+        finally
+        {
+            isSavingMark = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task SetMarkActiveAsync(ChartMark mark, bool isActive)
+    {
+        return ChangeMarkAsync(() => ChartMarkService.SetActiveAsync(mark.Id, isActive));
+    }
+
+    private Task DeleteMarkAsync(int markId)
+    {
+        confirmDeleteMarkId = null;
+        if (editingMarkId == markId)
+        {
+            CancelMarkForm();
+        }
+
+        return ChangeMarkAsync(() => ChartMarkService.DeleteAsync(markId));
+    }
+
+    private async Task ChangeMarkAsync(Func<Task<ChartMarkResult>> change)
+    {
+        if (company == null)
+        {
+            return;
+        }
+
+        markPanelError = null;
+        try
+        {
+            ChartMarkResult? result = null;
+            await RunExclusiveAsync(async () =>
+            {
+                result = await change();
+                marks = await ChartMarkService.GetForCompanyAsync(company.Id);
+            });
+
+            if (result != null && !result.Success)
+            {
+                markPanelError = result.ErrorMessage;
+            }
+
+            await UpdateChartDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al cambiar una marca del gráfico");
+            markPanelError = "No se pudo guardar el cambio de la marca.";
+        }
     }
 
     // ---------------------------------------------------------------- Precio en vivo
@@ -795,15 +2218,20 @@
         tradeError = null;
         successMessage = null;
         tradeExchangeRate = null;
+        tradeBankAccountName = string.Empty;
         UpdateMarketState();
 
-        if (!IsBaseCurrency)
+        await RunExclusiveAsync(async () =>
         {
-            await RunExclusiveAsync(async () =>
+            if (!IsBaseCurrency)
             {
                 tradeExchangeRate = (await ExchangeRateService.GetCurrentRateAsync(CurrencyCode))?.Rate;
-            });
-        }
+            }
+
+            // Cuentas para ingresar la venta (el servicio lo revalida al confirmar)
+            tradeBankAccounts = await BankService.GetAllBankAccountsAsync();
+            defaultTradeBankAccountName = (await BankService.GetDefaultBankAccountAsync())?.Name;
+        });
     }
 
     // El precio por acción se guarda con 2 decimales
@@ -849,7 +2277,8 @@
             PricePerShare = tradePrice,
             Commission = tradeCommission,
             ExchangeRate = IsBaseCurrency ? null : tradeExchangeRate,
-            MarketState = marketState
+            MarketState = marketState,
+            BankAccountName = tradeBankAccountName
         };
 
         try
@@ -878,9 +2307,9 @@
             }
 
             operated = true;
-            successMessage = $"{(request.Type == "Compra" ? "Compra" : "Venta")} registrada: {request.NumberOfShares} acciones a {CurrencyFormatter.Format(request.PricePerShare, CurrencyCode)}.";
+            successMessage = $"{(request.Type == "Compra" ? "Compra" : "Venta")} registrada: {ShareQuantity.Format(request.NumberOfShares)} acciones a {CurrencyFormatter.Format(request.PricePerShare, CurrencyCode)}.";
             tradeType = null;
-            await RenderChartAsync();
+            await RenderChartAsync(await GetChartViewAsync());
         }
         catch (Exception ex)
         {

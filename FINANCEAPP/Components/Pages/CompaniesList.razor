@@ -19,6 +19,16 @@
                     <p class="lead text-muted">Información detallada de empresas y oportunidades de inversión</p>
                 </div>
                 <div class="d-flex gap-2">
+                    @* Calendario de dividendos (SPEC-21-01, RF-2) *@
+                    <a href="/dividends" class="btn btn-outline-primary btn-lg">
+                        <i class="bi bi-calendar-check me-2"></i>
+                        Dividendos
+                    </a>
+                    @* Índices para comparar en el gráfico (SPEC-05-04, RF-1) *@
+                    <a href="/indices" class="btn btn-outline-primary btn-lg">
+                        <i class="bi bi-bar-chart-line me-2"></i>
+                        Índices
+                    </a>
                     <button class="btn btn-outline-info btn-lg" @onclick="RefreshLivePricesInBackground" disabled="@isRefreshingLivePrices">
                         @if (isRefreshingLivePrices)
                         {
@@ -62,27 +72,79 @@
     }
     else
     {
-        <!-- Tarjetas de resumen -->
-        <div class="stat-grid">
+        <!-- Tarjetas de resumen (SPEC-01-08): bloque «Cartera» y bloque «Rentabilidad y diversificación».
+             Todo con las empresas con inversión y sus totales convertidos a la divisa base (SPEC-01-05) -->
+        <p class="stat-section">Cartera</p>
+        <div class="stat-grid stat-grid-3">
+            <div class="stat-card" style="--swatch:var(--plum)">
+                <p class="stat-label">Invertido (coste)</p>
+                <p class="stat-value">@(portfolioResult.HasValue ? CurrencyFormatter.Format(investedTotals.InvestedInitial, investedTotals.BaseCurrencyCode) : "—")</p>
+            </div>
             <div class="stat-card" style="--swatch:var(--indigo)">
-                <p class="stat-label">Total empresas</p>
-                <p class="stat-value">@companies.Count</p>
+                <p class="stat-label">Valor actual</p>
+                <p class="stat-value">@(portfolioResult.HasValue ? CurrencyFormatter.Format(investedTotals.CurrentValue, investedTotals.BaseCurrencyCode) : "—")</p>
+            </div>
+            <div class="stat-card" style="--swatch:@(SignSwatch(portfolioResult))">
+                <p class="stat-label">Resultado</p>
+                @if (portfolioResult.HasValue)
+                {
+                    <p class="stat-value" style="color:@SignSwatch(portfolioResult)">
+                        @(portfolioResult.Value >= 0 ? "▲ +" : "▼ ")@CurrencyFormatter.Format(portfolioResult.Value, investedTotals.BaseCurrencyCode)
+                    </p>
+                    @if (investedTotals.Dividends > 0)
+                    {
+                        <p class="stat-sub">+ @CurrencyFormatter.Format(investedTotals.Dividends, investedTotals.BaseCurrencyCode) en dividendos</p>
+                    }
+                }
+                else
+                {
+                    <p class="stat-value">—</p>
+                }
+            </div>
+        </div>
+        @if (investedTotals.MissingRateCompanies > 0)
+        {
+            @* Un solo aviso para los dos bloques: todos usan los mismos totales (SPEC-01-08, D5) *@
+            <p class="stat-note small text-muted">
+                <i class="bi bi-info-circle me-1"></i>@investedTotals.MissingRateCompanies @(investedTotals.MissingRateCompanies == 1 ? "empresa en otra divisa sin tipo de cambio no incluida" : "empresas en otra divisa sin tipo de cambio no incluidas") en los importes ni en la rentabilidad. <a href="/settings">Configurar tipos</a>
+            </p>
+        }
+
+        <p class="stat-section">Rentabilidad y diversificación</p>
+        <div class="stat-grid stat-grid-4">
+            @* Por precio (SPEC-01-05) y con dividendos (SPEC-01-07), ponderadas por lo invertido *@
+            <div class="stat-card span-2" style="--swatch:@(SignSwatch(weightedReturn))">
+                <p class="stat-label">Rentabilidad media</p>
+                @if (weightedReturn.HasValue)
+                {
+                    <p class="stat-value" style="color:@SignSwatch(weightedReturn)">
+                        @(weightedReturn.Value >= 0 ? "▲" : "▼") @weightedReturn.Value.ToString("N2")%
+                        <span class="stat-value-unit">por precio</span>
+                    </p>
+                }
+                else
+                {
+                    <p class="stat-value">—</p>
+                }
+                @if (weightedReturnWithDividends.HasValue)
+                {
+                    <p class="stat-sub">
+                        <span style="color:@SignSwatch(weightedReturnWithDividends)">@(weightedReturnWithDividends.Value >= 0 ? "▲" : "▼") @weightedReturnWithDividends.Value.ToString("N2")%</span>
+                        con dividendos
+                    </p>
+                }
             </div>
             <div class="stat-card" style="--swatch:var(--teal)">
-                <p class="stat-label">Sectores únicos</p>
-                <p class="stat-value">@uniqueSectorsCount</p>
+                <p class="stat-label">Empresas · sectores</p>
+                <p class="stat-value">@investedCompanies.Count · @uniqueSectorsCount</p>
+                @if (investedCompanies.Count < companies.Count)
+                {
+                    <p class="stat-sub">de @companies.Count en el catálogo</p>
+                }
             </div>
             <div class="stat-card" style="--swatch:var(--amber)">
-                <p class="stat-label">Dividend yield promedio</p>
-                <p class="stat-value">@averageDividendYield.ToString("N2")%</p>
-            </div>
-            <div class="stat-card" style="--swatch:var(--plum)">
-                <p class="stat-label">Total invertido</p>
-                <p class="stat-value">@CurrencyFormatter.Format(convertedTotals.InvestedInitial, convertedTotals.BaseCurrencyCode)</p>
-                @if (convertedTotals.MissingRateCompanies > 0)
-                {
-                    <p class="stat-note small text-muted mb-0">@convertedTotals.MissingRateCompanies @(convertedTotals.MissingRateCompanies == 1 ? "empresa en otra divisa sin tipo de cambio no incluida" : "empresas en otra divisa sin tipo de cambio no incluidas"). <a href="/settings">Configurar tipos</a></p>
-                }
+                <p class="stat-label">Yield medio</p>
+                <p class="stat-value">@(averageDividendYield.HasValue ? averageDividendYield.Value.ToString("N2") + "%" : "—")</p>
             </div>
         </div>
 
@@ -99,7 +161,22 @@
                 </button>
             </div>
             <div class="card-body p-0">
-                <div class="table-responsive">
+                @* Modo corto: solo empresas con inversión (SPEC-01-05); la lista extendida muestra todo el catálogo *@
+                @if (!isExtended && investedCompanies.Count == 0)
+                {
+                    <div class="alert alert-info m-3 mb-3">
+                        <i class="bi bi-info-circle me-1"></i>
+                        No hay empresas con inversión. Pulsa «Lista extendible» para ver todo el catálogo.
+                    </div>
+                }
+                else if (!isExtended && investedCompanies.Count < companies.Count)
+                {
+                    <div class="small text-muted px-3 pt-2">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Mostrando @investedCompanies.Count de @companies.Count empresas (solo las que tienen inversión). Pulsa «Lista extendible» para ver todas.
+                    </div>
+                }
+                <div class="table-responsive" hidden="@(visibleCompanies.Count == 0)">
                     <table class="table table-sm table-hover align-middle mb-0 companies-table @(isExtended ? "" : "companies-table--compact")">
                         <thead class="table-light">
                             <tr>
@@ -112,7 +189,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var company in companies)
+                            @foreach (var company in visibleCompanies)
                             {
                                 <tr>
                                     <td>
@@ -191,7 +268,23 @@
                                             </div>
                                             <div class="cell-pair">
                                                 <span class="cell-label">Nº acciones</span>
-                                                <span>@company.NumberOfShares</span>
+                                                <span>@ShareQuantity.Format(company.NumberOfShares)</span>
+                                            </div>
+                                            @* Peso de lo invertido en esta empresa sobre el total invertido (SPEC-01-06) *@
+                                            <div class="cell-pair">
+                                                <span class="cell-label">Peso</span>
+                                                @if (weights.TryGetValue(company.Id, out var weight))
+                                                {
+                                                    <span>@weight.ToString("N2")%</span>
+                                                }
+                                                else if (InvestedCompaniesSummary.HasInvestment(company))
+                                                {
+                                                    <span class="text-muted" title="Sin tipo de cambio: no se incluye en el peso">—</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">—</span>
+                                                }
                                             </div>
                                         }
                                         else
@@ -207,7 +300,7 @@
                                     }
                                     else
                                     {
-                                        <td class="text-end">@company.NumberOfShares</td>
+                                        <td class="text-end">@ShareQuantity.Format(company.NumberOfShares)</td>
                                     }
                                     <td>
                                         @if (isExtended)
@@ -286,7 +379,7 @@
             <div class="card-footer text-muted">
                 <small>
                     <i class="bi bi-info-circle me-1"></i>
-                    Mostrando @companies.Count empresa(s) registrada(s) en el sistema
+                    Mostrando @visibleCompanies.Count empresa(s) de las @companies.Count registrada(s) en el sistema
                 </small>
             </div>
         </div>
@@ -334,6 +427,17 @@
                             <i class="bi bi-exclamation-octagon-fill me-1"></i>
                             Se eliminarán también sus <strong>@companyToDeleteOperationsCount operación(es)</strong>
                             y el histórico de cotización guardado.
+                            @if (companyToDeleteBankMovementsCount > 0)
+                            {
+                                <span>Desaparecerán también <strong>@companyToDeleteBankMovementsCount movimiento(s) bancario(s)</strong> generados por sus compras y dividendos, y los saldos de las cuentas se recalcularán.</span>
+                            }
+                        </div>
+                    }
+                    @if (companyToDeleteDividendsCount > 0)
+                    {
+                        <div class="alert alert-warning">
+                            <i class="bi bi-calendar-x me-1"></i>
+                            Se eliminarán también sus <strong>@companyToDeleteDividendsCount línea(s) del calendario de dividendos</strong>.
                         </div>
                     }
                     <p class="text-danger mb-0">
@@ -385,17 +489,28 @@
     private bool isDeleting = false;
     private CompanyDetail? companyToDelete = null;
     private int companyToDeleteOperationsCount = 0;
+    private int companyToDeleteBankMovementsCount = 0;
+    private int companyToDeleteDividendsCount = 0;
 
     // Referencia al modal del gráfico de cotización
     private CompanyChartModal? chartModal;
 
     // Métricas calculadas
-    private int uniqueSectorsCount => companies?.Select(c => c.Sector).Distinct().Count() ?? 0;
-    private decimal averageDividendYield => companies?.Any() == true ? companies.Average(c => c.DividendYield) : 0;
-    // Totales convertidos a la divisa base con el tipo actual (SPEC-01-02 y SPEC-01-03);
-    // las empresas en otra divisa sin tipo quedan fuera y se cuentan aparte
+    // Las tarjetas de empresas, sectores, yield y rentabilidad solo cuentan las empresas con inversión (SPEC-01-05)
+    private List<CompanyDetail> investedCompanies = new();
+    private ConvertedCompanyTotals investedTotals = new();
+    private Dictionary<int, decimal> weights = new();
+    private List<CompanyDetail> visibleCompanies => isExtended ? companies ?? new() : investedCompanies;
+    private int uniqueSectorsCount => investedCompanies.Select(c => c.Sector).Distinct().Count();
+    private decimal? averageDividendYield => InvestedCompaniesSummary.AverageDividendYield(investedCompanies);
+    private decimal? weightedReturn => InvestedCompaniesSummary.WeightedReturnPercent(investedTotals);
+    private decimal? weightedReturnWithDividends => InvestedCompaniesSummary.WeightedReturnWithDividendsPercent(investedTotals);
+    private decimal? portfolioResult => InvestedCompaniesSummary.UnrealizedResult(investedTotals);
+
+    // Verde si es ≥ 0, rojo si es negativo y gris sin dato
+    private static string SignSwatch(decimal? value) => value.HasValue ? (value.Value >= 0 ? "var(--gain)" : "var(--loss)") : "var(--ink-soft)";
+    // Divisa base de los totales convertidos (SPEC-01-02 y SPEC-01-03)
     private BaseCurrencyInfo baseCurrency = new();
-    private ConvertedCompanyTotals convertedTotals = new();
 
     // Ventana «Detalles» (SPEC-01-03)
     private ExchangeDetails? exchangeDetails;
@@ -477,13 +592,20 @@
             // Obtener todas las empresas desde el servicio
             companies = await CompanyService.GetAllAsync();
             baseCurrency = await CountryService.GetBaseCurrencyAsync();
-            convertedTotals = await ExchangeRateService.GetConvertedTotalsAsync(companies);
+
+            // Solo las empresas con inversión alimentan las tarjetas de resumen y la rentabilidad media (SPEC-01-05)
+            investedCompanies = InvestedCompaniesSummary.GetInvested(companies);
+            investedTotals = await ExchangeRateService.GetConvertedTotalsAsync(investedCompanies);
+            weights = InvestedCompaniesSummary.GetWeights(investedTotals);
         }
         catch (Exception ex)
         {
             // En producción, aquí se debería implementar un sistema de logging
             Console.WriteLine($"Error al cargar empresas: {ex.Message}");
             companies = new List<CompanyDetail>();
+            investedCompanies = new List<CompanyDetail>();
+            investedTotals = new ConvertedCompanyTotals();
+            weights = new Dictionary<int, decimal>();
         }
         finally
         {
@@ -514,6 +636,8 @@
     {
         companyToDelete = company;
         companyToDeleteOperationsCount = await CompanyService.CountOperationsAsync(company.Name);
+        companyToDeleteBankMovementsCount = await CompanyService.CountBankMovementsAsync(company.Name);
+        companyToDeleteDividendsCount = await CompanyService.CountDividendPaymentsAsync(company.Id);
         showDeleteModal = true;
     }
 
@@ -544,6 +668,8 @@
     {
         companyToDelete = null;
         companyToDeleteOperationsCount = 0;
+        companyToDeleteBankMovementsCount = 0;
+        companyToDeleteDividendsCount = 0;
         showDeleteModal = false;
     }
 
@@ -568,6 +694,8 @@
                 showDeleteModal = false;
                 companyToDelete = null;
                 companyToDeleteOperationsCount = 0;
+                companyToDeleteBankMovementsCount = 0;
+                companyToDeleteDividendsCount = 0;
             }
             else
             {

@@ -51,4 +51,8 @@ Permite mantener las cuentas bancarias del usuario y ver su saldo actual y el to
 ## 8. Observaciones y limitaciones detectadas
 
 - El IBAN solo se limita en longitud; no se valida su formato ni su dígito de control.
-- Al editar una cuenta se puede modificar el saldo directamente, lo que puede dejarlo distinto del que resultaría de sus movimientos hasta el siguiente recálculo.
+- Al editar una cuenta se puede modificar el saldo directamente; desde SPEC-10-01 la cuenta guarda además un saldo inicial (`OpeningBalance`) que absorbe la diferencia con los movimientos, de modo que el saldo escrito se conserva en los recálculos siguientes. Al crear una cuenta, el saldo escrito es su saldo inicial.
+
+## 9. Features relacionadas
+
+- [SPEC-10-02 · Traspasos entre cuentas bancarias](../spec10-movimientos-bancarios-y-saldo/spec10-02-account-transfers/spec10-02.md): botón «Traspaso» en `/banco` (con dos o más cuentas) y formulario de origen, destino e importe (estado: implementada y compilada, pendiente de probar a mano).

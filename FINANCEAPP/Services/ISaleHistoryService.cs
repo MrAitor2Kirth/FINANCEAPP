@@ -14,13 +14,25 @@ namespace FINANCEAPP.Services
         Task<List<SaleHistory>> GetAllAsync();
 
         /// <summary>
+        /// Devuelve los registros cuya fecha de venta cae en el periodo (SPEC-02-05), de la venta más reciente
+        /// a la más antigua. Con Total histórico equivale a <see cref="GetAllAsync"/>.
+        /// </summary>
+        Task<List<SaleHistory>> GetByPeriodAsync(SalesPeriodFilter filter);
+
+        /// <summary>
+        /// Indica si hay alguna venta en el histórico, sea cual sea el periodo (SPEC-02-05).
+        /// </summary>
+        Task<bool> HasAnyAsync();
+
+        /// <summary>
         /// Devuelve un registro por su Id, o null si no existe.
         /// </summary>
         Task<SaleHistory?> GetByIdAsync(int id);
 
         /// <summary>
-        /// Cambia el precio de venta y recalcula importe y beneficio.
-        /// Devuelve false si el registro no existe o el precio no es mayor que 0.
+        /// Cambia el precio de venta y recalcula importe y beneficio, y el importe y la descripción de su
+        /// ingreso bancario si lo tiene (SPEC-02-04), en una transacción. Devuelve false si el registro no existe
+        /// o el precio no es mayor que 0; lanza InvalidOperationException si la liquidez neta no es positiva.
         /// </summary>
         Task<bool> UpdateSellPriceAsync(int id, decimal sellPrice);
 

@@ -105,7 +105,8 @@ FINANCEAPP/                          ← raíz del repositorio
 │   │   └── specs/                   Especificaciones detalladas (specs/specNN-<nombre>/specNN.md) y features
 │   ├── Data/
 │   │   ├── AppDbContext.cs          DbContext de EF Core
-│   │   └── DatabaseSchemaUpgrader.cs  Migraciones ligeras sin pérdida de datos
+│   │   ├── DatabaseSchemaUpgrader.cs  Migraciones ligeras sin pérdida de datos
+│   │   └── DividendProposalsData.cs   Dividendos anunciados para «Propuestas» de /dividends (SPEC-21-01)
 │   ├── Models/                      Entidades (ver 3.3)
 │   ├── Services/                    Interfaces `I*Service` + implementaciones
 │   ├── Platforms/                   Código específico (Android, iOS, MacCatalyst, Windows)
@@ -128,6 +129,10 @@ FINANCEAPP/                          ← raíz del repositorio
 | `CompanyDetail` | Name, Ticker, Sector, CurrentPrice, LivePrice, LivePriceUpdatedAt, DividendYield, TotalInvestedInitial, TotalDividends, PlusvaliaReturnPercent, DividendPlusvaliaReturnPercent, NumberOfShares |
 | `Operation` | CompanyName, Date, CloseDate, PricePerShare, NumberOfShares, Commission, Amount, Type |
 | `PriceHistoryPoint` | CompanyId (FK a `CompanyDetail`), Date, Open, High, Low, Close, Volume, FetchedAt |
+| `ChartMark` | CompanyId (nulo = global), Date, Description, IsActive (marcas del gráfico, SPEC-05-03) |
+| `BenchmarkIndex` | Name, Symbol (índices para comparar en el gráfico, SPEC-05-04) |
+| `BenchmarkPricePoint` | BenchmarkIndexId, Date, Open, High, Low, Close, Volume, FetchedAt (histórico diario de los índices, SPEC-05-04) |
+| `DividendPayment` | CompanyId, PaymentDate, ExDividendDate, AmountPerShare, NumberOfShares, DividendPercent, Status, OperationId, Source, Notes (calendario de dividendos, SPEC-21-01) |
 | `Fund` | Name, FundType, Manager, TER, ISIN, HistoricalReturn, TotalInvested, CurrentValue |
 | `FundOperation` | FundName, Type, Amount, Date |
 | `FundValueHistory` | FundName, Value, Date, ReturnAtDate, Notes |
@@ -156,14 +161,20 @@ Nota de diseño: las operaciones se enlazan con su entidad principal **por nombr
 | `IDashboardService` | Agregados para el dashboard |
 | `IFinancialService` | Registros financieros heredados (`FinancialRecord`) |
 | `IStockPriceService` | Precio actual y OHLC diario desde Yahoo Finance |
-| `IPriceHistoryService` | Histórico con caché en SQLite y agregación diaria/mensual/anual |
+| `IPriceHistoryService` | Histórico con caché en SQLite por bloques, cinco temporalidades, sesiones futuras y colocación de marcas |
+| `IChartMarkService` | Marcas temporales del gráfico, de empresa o globales (SPEC-05-03) |
+| `IDividendService` | Calendario de dividendos: líneas, resumen, generar la operación, Inicio, propuestas y marcas del gráfico (SPEC-21-01) |
+| `IBenchmarkIndexService` | Índices para comparar: alta, edición, baja con su histórico, «Comprobar» y sugerencias (SPEC-05-04) |
+| `ChartComparison` (estático) | Comparación de dos series: alineación, base 100, rentabilidades y correlación del tramo visible (SPEC-05-04) |
 
 ### 3.5 Cotizaciones y gráfico
 
-1. `StockPriceService` consulta `https://query1.finance.yahoo.com/v8/finance/chart/{ticker}` (precio actual con `range=1d`; histórico con `range=5y` por defecto). Registra en log cualquier respuesta no válida.
-2. `PriceHistoryService` guarda las barras diarias en la tabla `PriceHistoryPoints`. La caché se considera **fresca durante 12 horas**; pasado ese tiempo se vuelve a consultar Yahoo Finance.
-3. La agregación **mensual y anual** se calcula en el servidor a partir de los puntos diarios cacheados (`ChartGranularity`: `Daily`, `Monthly`, `Yearly`).
-4. `CompanyChartModal.razor` pide la serie y la entrega a `wwwroot/js/companyChart.js` por JS interop, que dibuja el gráfico con ApexCharts, superpone las operaciones de compra y la línea del precio actual.
+1. `StockPriceService` consulta `https://query1.finance.yahoo.com/v8/finance/chart/{ticker}`: precio actual con `range=1d`, histórico por tramos con `period1`/`period2` (`GetHistoryRangeAsync`) y último dividendo con `events=div`. Registra en log cualquier respuesta no válida.
+2. `PriceHistoryService` guarda las barras diarias en `PriceHistoryPoints`: primero los 2 últimos años y, en segundo plano, bloques de 10 años hasta la primera cotización (SPEC-05-02). La caché es **fresca durante 12 horas**; después solo se piden los días nuevos. Las barras de una hora viven solo en memoria.
+3. Temporalidades (`ChartGranularity`): Horas, Diario, Semanal, Mensual y Anual; las agregadas se calculan en el servidor a partir del diario, con el volumen en dinero aproximado.
+4. `CompanyChartModal.razor` entrega la serie a `wwwroot/js/companyChart.js`, que dibuja con ApexCharts sobre un **eje por sesiones** (sin huecos de fines de semana), con marcadores de operaciones, marcas, pagos de dividendo (también futuros, sobre sesiones futuras vacías), volumen y un minigráfico navegador (SPEC-05-03 y SPEC-21-01).
+5. `/dividends` (`DividendsList.razor`) gestiona el calendario de dividendos; Inicio muestra los próximos 90 días.
+6. «Comparar» en el gráfico superpone otra empresa o un índice de `/indices` (`BenchmarkIndicesList.razor`) en base 100, con rentabilidades y correlación del tramo visible calculadas en `ChartComparison`; el histórico de los índices va en `BenchmarkPricePoints` con las mismas reglas que el de las empresas (SPEC-05-04).
 
 ### 3.6 Base de datos y migraciones
 

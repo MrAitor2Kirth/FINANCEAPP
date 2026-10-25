@@ -38,8 +38,20 @@
                 <button class="btn btn-primary" @onclick="NavigateToNewAccount">
                     <i class="bi bi-plus-lg me-1" aria-hidden="true"></i> Nueva Cuenta
                 </button>
+                @* Traspaso entre cuentas (SPEC-10-02): hacen falta al menos dos *@
+                @if (bankAccounts.Count >= 2)
+                {
+                    <button class="btn btn-outline-primary ms-2" @onclick="ToggleTransferForm">
+                        <i class="bi bi-arrow-left-right me-1" aria-hidden="true"></i> Traspaso
+                    </button>
+                }
             </div>
         </div>
+
+        @if (showTransferForm && bankAccounts.Count >= 2)
+        {
+            <BankTransferForm Accounts="@bankAccounts" OnTransferred="@OnTransferred" OnCancel="@ToggleTransferForm" />
+        }
 
         <div class="stat-grid">
             <div class="stat-card" style="--swatch:var(--sage)">
@@ -104,7 +116,7 @@
                                 <td colspan="6">
                                     <div class="p-3">
                                         <h6 class="mb-3">Últimas Operaciones</h6>
-                                        <BankOperationsList AccountName="@account.Name" BankService="@BankService" OnOperationAdded="@RefreshAccounts" />
+                                        <BankOperationsList @key="@($"{account.Id}-{refreshVersion}")" AccountName="@account.Name" BankService="@BankService" OnOperationAdded="@RefreshAccounts" />
                                     </div>
                                 </td>
                             </tr>
@@ -122,6 +134,21 @@
     private int? expandedAccountId = null;
     private decimal totalBalance = 0;
 
+    // Traspasos entre cuentas (SPEC-10-02): formulario y recarga de los movimientos desplegados
+    private bool showTransferForm = false;
+    private int refreshVersion = 0;
+
+    private void ToggleTransferForm()
+    {
+        showTransferForm = !showTransferForm;
+    }
+
+    private async Task OnTransferred()
+    {
+        refreshVersion++;
+        await RefreshAccounts();
+    }
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -136,7 +163,8 @@
 
     private async Task RefreshAccounts()
     {
-        isLoading = true;
+        // El spinner solo se ve en la primera carga: así un refresco no cierra el desplegable de movimientos
+        isLoading = bankAccounts.Count == 0;
         try
         {
             bankAccounts = await BankService.GetAllBankAccountsAsync();

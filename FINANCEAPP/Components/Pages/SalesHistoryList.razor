@@ -1,10 +1,12 @@
 ﻿@page "/sales-history"
+@using System.Globalization
 @using FINANCEAPP.Models
 @inject ISaleHistoryService SaleHistoryService
 @inject IOperationService OperationService
 @inject ICompanyService CompanyService
 @inject ICountryService CountryService
 @inject IExchangeRateService ExchangeRateService
+@inject IBankService BankService
 
 <PageTitle>Histórico de ventas</PageTitle>
 
@@ -56,7 +58,7 @@
             <p class="mt-3 text-muted">Cargando histórico...</p>
         </div>
     }
-    else if (records.Count == 0)
+    else if (!hasAnySale)
     {
         <div class="alert alert-info d-flex align-items-center" role="alert">
             <i class="bi bi-info-circle-fill me-2"></i>
@@ -67,6 +69,48 @@
     }
     else
     {
+        @* Selector de periodo (SPEC-02-05): la lógica del filtro vive en SalesPeriodFilter *@
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <div class="btn-group" role="group" aria-label="Modo de periodo">
+                @foreach (var option in periodModes)
+                {
+                    var mode = option.Mode;
+                    <button type="button" class="btn btn-sm @(filter.Mode == mode ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetMode(mode)">@option.Text</button>
+                }
+            </div>
+            @if (filter.Mode != SalesPeriodMode.All)
+            {
+                <div class="d-flex align-items-center gap-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="PreviousPeriod" title="Periodo anterior" aria-label="Periodo anterior">
+                        <i class="bi bi-chevron-left"></i>
+                    </button>
+                    @if (filter.Mode == SalesPeriodMode.Day)
+                    {
+                        <input type="date" class="form-control form-control-sm" style="width:auto"
+                               value="@filter.Reference.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)"
+                               @onchange="OnDayChanged" />
+                    }
+                    else if (filter.Mode == SalesPeriodMode.Month)
+                    {
+                        <input type="month" class="form-control form-control-sm" style="width:auto"
+                               value="@filter.Reference.ToString("yyyy-MM", CultureInfo.InvariantCulture)"
+                               @onchange="OnMonthChanged" />
+                    }
+                    else
+                    {
+                        <input type="number" class="form-control form-control-sm" style="width:6rem"
+                               min="@SalesPeriodFilter.MinYear" max="@SalesPeriodFilter.MaxYear" step="1"
+                               value="@filter.Reference.Year"
+                               @onchange="OnYearChanged" />
+                    }
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="NextPeriod" title="Periodo siguiente" aria-label="Periodo siguiente">
+                        <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+            }
+            <span class="fw-bold ms-1">@filter.Label</span>
+        </div>
+
         <!-- Tarjetas de resumen -->
         <div class="stat-grid">
             <div class="stat-card" style="--swatch:var(--indigo)">
@@ -75,15 +119,14 @@
             </div>
             <div class="stat-card" style="--swatch:var(--teal)">
                 <p class="stat-label">Importe vendido</p>
-                <p class="stat-value">@CurrencyFormatter.Format(totalAmount, baseCurrency.CurrencyCode)</p>
-                @if (excludedSalesCount > 0)
-                {
-                    <p class="stat-note small text-muted mb-0">@excludedSalesCount @(excludedSalesCount == 1 ? "venta en otra divisa no incluida" : "ventas en otra divisa no incluidas") hasta que exista el tipo de cambio</p>
-                }
-                @if (totals.ConvertedSales > 0)
-                {
-                    <p class="stat-note small text-muted mb-0">Incluye @totals.ConvertedSales @(totals.ConvertedSales == 1 ? "venta convertida" : "ventas convertidas") a @baseCurrency.CurrencyCode con el tipo actual</p>
-                }
+                <p class="stat-value">
+                    @CurrencyFormatter.Format(totalAmount, baseCurrency.CurrencyCode)
+                    @* Las notas de conversión solo se ven al pasar el ratón por el icono *@
+                    @if (AmountNotes is { Length: > 0 } notes)
+                    {
+                        <i class="bi bi-info-circle fs-6 text-muted ms-1" title="@notes" style="cursor:help"></i>
+                    }
+                </p>
             </div>
             <div class="stat-card" style="--swatch:var(--ink-soft)">
                 <p class="stat-label">Comisiones</p>
@@ -97,6 +140,15 @@
             </div>
         </div>
 
+        @if (records.Count == 0)
+        {
+            <div class="alert alert-info d-flex align-items-center" role="alert">
+                <i class="bi bi-info-circle-fill me-2"></i>
+                <div>No hay ventas en este periodo.</div>
+            </div>
+        }
+        else
+        {
         <div class="card shadow-sm">
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -113,6 +165,8 @@
                                 <th scope="col" class="text-end">Importe</th>
                                 <th scope="col" class="text-end">Comisiones</th>
                                 <th scope="col" class="text-end">Beneficio</th>
+                                <th scope="col" class="text-end">Rentabilidad</th>
+                                <th scope="col">Banco</th>
                                 <th scope="col" class="text-center">Acciones</th>
                             </tr>
                         </thead>
@@ -125,7 +179,7 @@
                                     <td class="align-middle"><strong>@record.CompanyName</strong></td>
                                     <td class="align-middle">@(string.IsNullOrWhiteSpace(record.Ticker) ? "-" : record.Ticker)</td>
                                     <td class="text-center align-middle">@record.SaleDate.ToString("dd/MM/yyyy")</td>
-                                    <td class="text-end align-middle">@record.NumberOfShares.ToString("N0")</td>
+                                    <td class="text-end align-middle">@ShareQuantity.Format(record.NumberOfShares)</td>
                                     <td class="text-end align-middle">@record.AverageBuyPrice.ToString("N4")</td>
                                     <td class="text-end align-middle">
                                         @if (isEditing)
@@ -148,6 +202,21 @@
                                     <td class="text-end align-middle">@CurrencyFormatter.Format(record.Commission, CurrencyOf(record))</td>
                                     <td class="text-end align-middle fw-bold" style="color:@(record.Profit >= 0 ? "var(--gain)" : "var(--loss)")">
                                         @(record.Profit >= 0 ? "▲" : "▼") @CurrencyFormatter.Format(record.Profit, CurrencyOf(record))
+                                    </td>
+                                    <td class="text-end align-middle fw-bold" style="color:@((record.ReturnPercent ?? 0) >= 0 ? "var(--gain)" : "var(--loss)")">
+                                        @(record.ReturnPercent.HasValue ? $"{record.ReturnPercent.Value:+0.00;-0.00;0.00} %" : "—")
+                                    </td>
+                                    <td class="align-middle">
+                                        @if (deposits.TryGetValue(record.Id, out var depositAccount))
+                                        {
+                                            <span class="small text-muted"><i class="bi bi-bank me-1"></i>Ingresada en @depositAccount</span>
+                                        }
+                                        else if (depositingId != record.Id)
+                                        {
+                                            <button type="button" class="btn btn-outline-primary btn-sm" @onclick="() => StartDeposit(record)" disabled="@(editingId.HasValue || depositingId.HasValue)" title="Ingresar la liquidez de esta venta en una cuenta bancaria">
+                                                <i class="bi bi-bank me-1"></i>Ingresar en banco
+                                            </button>
+                                        }
                                     </td>
                                     <td class="text-center align-middle">
                                         <div class="btn-group-sm d-flex gap-1 justify-content-center" role="group">
@@ -178,6 +247,48 @@
                                         </div>
                                     </td>
                                 </tr>
+                                @if (depositingId == record.Id)
+                                {
+                                    @* Ingreso de una venta ya registrada (SPEC-02-04, RF-10): las reglas las aplica el servicio *@
+                                    <tr class="table-info">
+                                        <td colspan="13">
+                                            <div class="d-flex flex-wrap align-items-end gap-2">
+                                                @if (bankAccounts.Count == 0)
+                                                {
+                                                    <span class="text-danger small">Crea una cuenta bancaria en Banco antes de ingresar la venta.</span>
+                                                }
+                                                else
+                                                {
+                                                    <div>
+                                                        <label class="form-label small mb-0">Cuenta bancaria</label>
+                                                        <select class="form-select form-select-sm" @bind="depositAccountName">
+                                                            <option value="">Por defecto: @defaultBankAccountName</option>
+                                                            @foreach (var account in bankAccounts)
+                                                            {
+                                                                <option value="@account.Name">@account.Name</option>
+                                                            }
+                                                        </select>
+                                                    </div>
+                                                    @if (depositInfo?.RequiresExchangeRate == true)
+                                                    {
+                                                        <div>
+                                                            <label class="form-label small mb-0">Tipo @depositInfo.CurrencyCode → @depositInfo.BaseCurrencyCode</label>
+                                                            <input type="number" min="0" step="0.000001" class="form-control form-control-sm" @bind="depositRate" placeholder="Obligatorio" />
+                                                        </div>
+                                                    }
+                                                    <button type="button" class="btn btn-primary btn-sm" @onclick="ConfirmDeposit" disabled="@isDepositing">
+                                                        @if (isDepositing)
+                                                        {
+                                                            <span class="spinner-border spinner-border-sm me-1"></span>
+                                                        }
+                                                        Confirmar ingreso
+                                                    </button>
+                                                }
+                                                <button type="button" class="btn btn-secondary btn-sm" @onclick="CancelDeposit" disabled="@isDepositing">Cancelar</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
                             }
                         </tbody>
                     </table>
@@ -186,10 +297,12 @@
             <div class="card-footer text-muted">
                 <small>
                     <i class="bi bi-info-circle me-1"></i>
-                    El beneficio se guarda con cada venta; solo se recalcula si edita el precio de venta.
+                    El beneficio se guarda con cada venta; solo se recalcula si edita el precio de venta, que también actualiza su ingreso en el banco.
+                    Rentabilidad = beneficio ÷ (precio medio de compra × acciones).
                 </small>
             </div>
         </div>
+        }
     }
 </div>
 
@@ -215,13 +328,13 @@
                     <div class="alert alert-warning">
                         <strong>Empresa:</strong> @recordToDelete.CompanyName<br />
                         <strong>Fecha:</strong> @recordToDelete.SaleDate.ToString("dd/MM/yyyy")<br />
-                        <strong>Acciones:</strong> @recordToDelete.NumberOfShares.ToString("N0")<br />
+                        <strong>Acciones:</strong> @ShareQuantity.Format(recordToDelete.NumberOfShares)<br />
                         <strong>Beneficio:</strong> @CurrencyFormatter.Format(recordToDelete.Profit, CurrencyOf(recordToDelete))
                     </div>
                     <div class="alert alert-info">
                         <i class="bi bi-info-circle me-1"></i>
                         Las compras que se cerraron con esta venta <strong>se reabrirán</strong> (las filas partidas se unirán de nuevo)
-                        y se eliminarán la operación de venta y este registro del histórico.
+                        y se eliminarán la operación de venta, este registro del histórico y su ingreso en la cuenta bancaria.
                     </div>
                     <p class="text-danger mb-0">
                         <i class="bi bi-exclamation-circle me-1"></i>
@@ -255,6 +368,17 @@
 
     private List<SaleHistory> records = new();
 
+    // Periodo mostrado (SPEC-02-05): por defecto el total histórico, sin recordar el último usado
+    private SalesPeriodFilter filter = SalesPeriodFilter.All;
+    private bool hasAnySale;
+    private static readonly (SalesPeriodMode Mode, string Text)[] periodModes =
+    {
+        (SalesPeriodMode.Day, "Día"),
+        (SalesPeriodMode.Month, "Mes"),
+        (SalesPeriodMode.Year, "Año"),
+        (SalesPeriodMode.All, "Total histórico")
+    };
+
     private bool isLoading = true;
     private bool isSaving = false;
     private bool isDeleting = false;
@@ -267,6 +391,16 @@
 
     // Eliminación
     private SaleHistory? recordToDelete;
+
+    // Ingreso en el banco (SPEC-02-04): venta → cuenta en la que está ingresada
+    private Dictionary<int, string> deposits = new();
+    private List<BankAccount> bankAccounts = new();
+    private string? defaultBankAccountName;
+    private int? depositingId;
+    private SaleDepositInfo? depositInfo;
+    private string depositAccountName = string.Empty;
+    private decimal? depositRate;
+    private bool isDepositing;
 
     // Divisa de cada venta = la de su empresa, buscada por nombre (EUR si la empresa ya no existe)
     private Dictionary<string, string> companyCurrencies = new();
@@ -292,6 +426,33 @@
     private ConvertedSaleTotals totals = new();
     private int excludedSalesCount => totals.MissingRateSales;
 
+    /// <summary>
+    /// Notas sobre las conversiones de divisa del importe vendido (texto del icono informativo); vacío si no hay ninguna
+    /// </summary>
+    private string AmountNotes
+    {
+        get
+        {
+            var notes = new List<string>();
+            if (excludedSalesCount > 0)
+            {
+                notes.Add($"{excludedSalesCount} {(excludedSalesCount == 1 ? "venta en otra divisa no incluida" : "ventas en otra divisa no incluidas")} hasta que exista el tipo de cambio.");
+            }
+
+            if (totals.ConvertedSales > 0)
+            {
+                notes.Add($"Incluye {totals.ConvertedSales} {(totals.ConvertedSales == 1 ? "venta convertida" : "ventas convertidas")} a {baseCurrency.CurrencyCode} con los tipos guardados de cada compra y venta.");
+            }
+
+            if (totals.ApproximateSales > 0)
+            {
+                notes.Add($"{totals.ApproximateSales} {(totals.ApproximateSales == 1 ? "venta usa" : "ventas usan")} el tipo actual en algún importe por no tener tipo guardado (cifra aproximada).");
+            }
+
+            return string.Join(" ", notes);
+        }
+    }
+
     private decimal totalAmount => totals.Amount;
     private decimal totalCommission => totals.Commission;
     private decimal totalProfit => totals.Profit;
@@ -309,13 +470,17 @@
         try
         {
             isLoading = true;
-            records = await SaleHistoryService.GetAllAsync();
+            records = await SaleHistoryService.GetByPeriodAsync(filter);
+            hasAnySale = records.Count > 0 || await SaleHistoryService.HasAnyAsync();
             var companies = await CompanyService.GetAllAsync();
             companyCurrencies = companies
                 .GroupBy(c => c.Name)
                 .ToDictionary(g => g.Key, g => g.First().CurrencyCode);
             baseCurrency = await CountryService.GetBaseCurrencyAsync();
             totals = await ExchangeRateService.GetConvertedSaleTotalsAsync(records, companyCurrencies);
+            deposits = await BankService.GetSaleDepositsAsync(records.Select(r => r.Id));
+            bankAccounts = await BankService.GetAllBankAccountsAsync();
+            defaultBankAccountName = (await BankService.GetDefaultBankAccountAsync())?.Name;
         }
         catch (Exception ex)
         {
@@ -326,6 +491,62 @@
         finally
         {
             isLoading = false;
+        }
+    }
+
+    // Cambio de periodo: cancela cualquier edición o ingreso abierto y recarga con el filtro nuevo
+    private async Task ApplyFilter(SalesPeriodFilter newFilter)
+    {
+        filter = newFilter;
+        editingId = null;
+        depositingId = null;
+        depositInfo = null;
+        errorMessage = null;
+        await LoadRecords();
+    }
+
+    private Task SetMode(SalesPeriodMode mode) => ApplyFilter(filter.WithMode(mode));
+
+    private Task PreviousPeriod() => ApplyFilter(filter.Previous());
+
+    private Task NextPeriod() => ApplyFilter(filter.Next());
+
+    private async Task OnDayChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParseExact(e.Value?.ToString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+        {
+            await ApplyFilter(SalesPeriodFilter.Create(SalesPeriodMode.Day, day));
+        }
+        else
+        {
+            errorMessage = "Indica un día válido.";
+        }
+    }
+
+    private async Task OnMonthChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParseExact(e.Value?.ToString(), "yyyy-MM", CultureInfo.InvariantCulture, DateTimeStyles.None, out var month))
+        {
+            await ApplyFilter(SalesPeriodFilter.Create(SalesPeriodMode.Month, month));
+        }
+        else
+        {
+            errorMessage = "Indica un mes válido.";
+        }
+    }
+
+    private async Task OnYearChanged(ChangeEventArgs e)
+    {
+        var yearFilter = int.TryParse(e.Value?.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var year)
+            ? SalesPeriodFilter.TryCreateYear(year)
+            : null;
+        if (yearFilter != null)
+        {
+            await ApplyFilter(yearFilter);
+        }
+        else
+        {
+            errorMessage = $"Indica un año entre {SalesPeriodFilter.MinYear} y {SalesPeriodFilter.MaxYear}.";
         }
     }
 
@@ -369,6 +590,10 @@
 
             editingId = null;
             await LoadRecords();
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
         }
         catch (Exception ex)
         {
@@ -437,5 +662,58 @@
     private void ClearError()
     {
         errorMessage = null;
+    }
+
+    private async Task StartDeposit(SaleHistory record)
+    {
+        errorMessage = null;
+        depositingId = record.Id;
+        depositAccountName = string.Empty;
+        depositRate = null;
+        depositInfo = await OperationService.GetSaleDepositInfoAsync(record.Id);
+        if (depositInfo?.RequiresExchangeRate == true)
+        {
+            // Sugerencia: el tipo actual de Configuración (el usuario puede cambiarlo)
+            depositRate = (await ExchangeRateService.GetCurrentRateAsync(depositInfo.CurrencyCode))?.Rate;
+        }
+    }
+
+    private void CancelDeposit()
+    {
+        depositingId = null;
+        depositInfo = null;
+    }
+
+    private async Task ConfirmDeposit()
+    {
+        if (!depositingId.HasValue || isDepositing)
+        {
+            return;
+        }
+
+        try
+        {
+            isDepositing = true;
+            errorMessage = null;
+            var result = await OperationService.DepositExistingSaleAsync(depositingId.Value, depositAccountName, depositRate);
+            if (!result.Success)
+            {
+                errorMessage = result.ErrorMessage;
+                return;
+            }
+
+            depositingId = null;
+            depositInfo = null;
+            await LoadRecords();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al ingresar la venta: {ex.Message}");
+            errorMessage = "No se pudo ingresar la venta en el banco. No se ha modificado ningún dato.";
+        }
+        finally
+        {
+            isDepositing = false;
+        }
     }
 }

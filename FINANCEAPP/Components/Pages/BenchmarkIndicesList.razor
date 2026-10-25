@@ -1,0 +1,368 @@
+@page "/indices"
+@inject IBenchmarkIndexService BenchmarkIndexService
+
+<PageTitle>Índices</PageTitle>
+
+@* Índices para comparar con las empresas en el gráfico de cotización (SPEC-05-04, RF-1) *@
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div>
+                    <h1 class="sw" style="--swatch:var(--indigo)">
+                        <i class="bi bi-bar-chart-line me-2"></i>
+                        Índices
+                    </h1>
+                    <p class="lead text-muted">Índices y otros símbolos de Yahoo para comparar con tus empresas en el gráfico</p>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="/companies" class="btn btn-outline-secondary btn-lg">
+                        <i class="bi bi-arrow-left me-2"></i>
+                        Volver a empresas
+                    </a>
+                    <button type="button" class="btn btn-primary btn-lg" @onclick="OpenNewForm" disabled="@isBusy">
+                        <i class="bi bi-plus-circle me-2"></i>
+                        Nuevo índice
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger d-flex align-items-center justify-content-between" role="alert">
+            <div><i class="bi bi-exclamation-triangle-fill me-2"></i>@errorMessage</div>
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => errorMessage = null"></button>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success d-flex align-items-center justify-content-between" role="alert">
+            <div><i class="bi bi-check-circle-fill me-2"></i>@successMessage</div>
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => successMessage = null"></button>
+        </div>
+    }
+
+    @if (suggestions.Count > 0)
+    {
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h6 class="mb-2"><i class="bi bi-lightbulb me-1"></i>Sugerencias</h6>
+                <p class="small text-muted mb-2">Índices del catálogo de mercado: pulsa uno para darlo de alta.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var suggestion in suggestions)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@isBusy" @onclick="() => AddSuggestionAsync(suggestion)">
+                            <i class="bi bi-plus me-1"></i>@suggestion.Name <span class="text-muted">(@suggestion.Symbol)</span>
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (formOpen)
+    {
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h5 class="card-title">@(editingId.HasValue ? "Editar índice" : "Nuevo índice")</h5>
+                <div class="row g-3 align-items-end">
+                    <div class="col-12 col-md-5">
+                        <label class="form-label">Nombre</label>
+                        <input type="text" class="form-control" maxlength="100" placeholder="p. ej. IBEX 35" @bind="input.Name" />
+                    </div>
+                    <div class="col-8 col-md-4">
+                        <label class="form-label">Símbolo de Yahoo</label>
+                        <input type="text" class="form-control" maxlength="20" placeholder="p. ej. ^IBEX" @bind="input.Symbol" @bind:after="ClearCheck" />
+                    </div>
+                    <div class="col-4 col-md-3">
+                        <button type="button" class="btn btn-outline-secondary w-100" disabled="@(isChecking || string.IsNullOrWhiteSpace(input.Symbol))" @onclick="CheckSymbolAsync">
+                            @if (isChecking)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-search me-1"></i>
+                            }
+                            Comprobar
+                        </button>
+                    </div>
+                </div>
+                @if (check != null)
+                {
+                    <div class="small mt-2 @(check.Found ? "text-success" : "text-danger")">
+                        <i class="bi @(check.Found ? "bi-check-circle" : "bi-x-circle") me-1"></i>@check.Message
+                    </div>
+                }
+                <p class="small text-muted mt-2 mb-0">
+                    Se admite cualquier símbolo de Yahoo Finance: índices (^GSPC), materias primas (GC=F), divisas (EURUSD=X)…
+                    @if (editingId.HasValue)
+                    {
+                        <span>Si cambias el símbolo, se borra el histórico guardado del anterior.</span>
+                    }
+                </p>
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <div class="alert alert-danger py-1 px-2 small mt-2 mb-0">@formError</div>
+                }
+                <div class="d-flex justify-content-end gap-2 mt-3">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CloseForm" disabled="@isBusy">Cancelar</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveAsync" disabled="@isBusy">
+                        @if (isBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Guardar
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <p class="mt-3 text-muted">Cargando índices...</p>
+        </div>
+    }
+    else if (indices.Count == 0)
+    {
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>No hay índices. Da de alta uno con las sugerencias o con «Nuevo índice».
+        </div>
+    }
+    else
+    {
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Símbolo de Yahoo</th>
+                                <th class="text-end">Último cierre guardado</th>
+                                <th class="text-end">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var index in indices)
+                            {
+                                <tr>
+                                    <td><strong>@index.Name</strong></td>
+                                    <td><code>@index.Symbol</code></td>
+                                    <td class="text-end">
+                                        @if (index.LastClose.HasValue)
+                                        {
+                                            @index.LastClose.Value.ToString("N2")
+                                            <span class="small text-muted ms-1">(@index.LastDate?.ToString("dd/MM/yyyy"))</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted" title="Se descarga la primera vez que se compara">—</span>
+                                        }
+                                    </td>
+                                    <td class="text-end text-nowrap">
+                                        @if (confirmDeleteId == index.Id)
+                                        {
+                                            <span class="small me-1">Se borrará también su histórico. ¿Borrar?</span>
+                                            <button type="button" class="btn btn-sm btn-danger" disabled="@isBusy" @onclick="() => DeleteAsync(index.Id)">Sí</button>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => confirmDeleteId = null">No</button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-primary" title="Editar" disabled="@isBusy" @onclick="() => OpenEditForm(index)">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" title="Borrar" disabled="@isBusy" @onclick="() => confirmDeleteId = index.Id">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <p class="small text-muted mt-2">Para comparar, abre el gráfico de una empresa y pulsa «Comparar».</p>
+    }
+</div>
+
+@code {
+    private List<BenchmarkIndexSummary> indices = new();
+    private List<BenchmarkIndexInput> suggestions = new();
+    private bool isLoading = true;
+    private bool isBusy;
+    private string? errorMessage;
+    private string? successMessage;
+
+    // Formulario (copia: no enlaza la entidad del contexto)
+    private bool formOpen;
+    private int? editingId;
+    private BenchmarkIndexInput input = new();
+    private string? formError;
+    private bool isChecking;
+    private BenchmarkSymbolCheck? check;
+    private int? confirmDeleteId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        try
+        {
+            indices = await BenchmarkIndexService.GetAllAsync();
+            suggestions = await BenchmarkIndexService.GetSuggestionsAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"No se pudieron cargar los índices: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void OpenNewForm()
+    {
+        editingId = null;
+        input = new BenchmarkIndexInput();
+        OpenForm();
+    }
+
+    private void OpenEditForm(BenchmarkIndexSummary index)
+    {
+        editingId = index.Id;
+        input = new BenchmarkIndexInput { Name = index.Name, Symbol = index.Symbol };
+        OpenForm();
+    }
+
+    private void OpenForm()
+    {
+        formError = null;
+        check = null;
+        confirmDeleteId = null;
+        formOpen = true;
+    }
+
+    private void CloseForm()
+    {
+        formOpen = false;
+        formError = null;
+        check = null;
+    }
+
+    private void ClearCheck() => check = null;
+
+    private async Task CheckSymbolAsync()
+    {
+        isChecking = true;
+        try
+        {
+            check = await BenchmarkIndexService.CheckSymbolAsync(input.Symbol);
+        }
+        catch (Exception ex)
+        {
+            check = new BenchmarkSymbolCheck { Message = $"No se pudo consultar Yahoo: {ex.Message}" };
+        }
+        finally
+        {
+            isChecking = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        isBusy = true;
+        formError = null;
+        try
+        {
+            var result = editingId.HasValue
+                ? await BenchmarkIndexService.UpdateAsync(editingId.Value, input)
+                : await BenchmarkIndexService.CreateAsync(input);
+
+            if (!result.Success)
+            {
+                formError = result.ErrorMessage;
+                return;
+            }
+
+            successMessage = editingId.HasValue ? "Índice actualizado." : $"Índice «{input.Name.Trim()}» dado de alta.";
+            formOpen = false;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            formError = $"No se pudo guardar el índice: {ex.Message}";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task AddSuggestionAsync(BenchmarkIndexInput suggestion)
+    {
+        isBusy = true;
+        errorMessage = null;
+        try
+        {
+            var result = await BenchmarkIndexService.CreateAsync(suggestion);
+            if (!result.Success)
+            {
+                errorMessage = result.ErrorMessage;
+                return;
+            }
+
+            successMessage = $"Índice «{suggestion.Name}» dado de alta.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"No se pudo dar de alta el índice: {ex.Message}";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        isBusy = true;
+        errorMessage = null;
+        try
+        {
+            var result = await BenchmarkIndexService.DeleteAsync(id);
+            if (!result.Success)
+            {
+                errorMessage = result.ErrorMessage;
+                return;
+            }
+
+            confirmDeleteId = null;
+            successMessage = "Índice borrado con su histórico.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"No se pudo borrar el índice: {ex.Message}";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+}

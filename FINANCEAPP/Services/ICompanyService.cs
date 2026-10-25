@@ -90,6 +90,22 @@ namespace FINANCEAPP.Services
         Task<int> CountOperationsAsync(string companyName);
 
         /// <summary>
+        /// Cuenta las líneas del calendario de dividendos de una empresa, para el aviso de baja (SPEC-21-01, RF-13)
+        /// </summary>
+        Task<int> CountDividendPaymentsAsync(int companyId);
+
+        /// <summary>
+        /// Estado («Pendiente» o «Cobrado») de la línea de dividendo de la próxima fecha de la ficha, o null si no hay (SPEC-21-01, RF-5)
+        /// </summary>
+        Task<string?> GetNextDividendStatusAsync(int companyId);
+
+        /// <summary>
+        /// Cuenta los movimientos bancarios generados por las compras y dividendos de una empresa (SPEC-02-06);
+        /// desaparecen al eliminarla
+        /// </summary>
+        Task<int> CountBankMovementsAsync(string companyName);
+
+        /// <summary>
         /// Comprueba el país de la empresa antes de guardarla (SPEC-01-02): obligatorio, existente y,
         /// si cambia a otra divisa con operaciones, rechazado. Devuelve el mensaje de error o null.
         /// </summary>

@@ -49,6 +49,13 @@ namespace FINANCEAPP.Models
         public decimal CurrentBalance { get; set; }
 
         /// <summary>
+        /// Saldo previo a los movimientos registrados.
+        /// El saldo actual es este valor más el efecto de los movimientos.
+        /// </summary>
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal OpeningBalance { get; set; }
+
+        /// <summary>
         /// Fecha de creación del registro
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.Now;

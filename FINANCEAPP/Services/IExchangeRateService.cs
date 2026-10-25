@@ -61,10 +61,16 @@ namespace FINANCEAPP.Services
 
         /// <summary>Empresas en otra divisa sin tipo actual: quedan fuera de los totales</summary>
         public int MissingRateCompanies { get; set; }
+
+        /// <summary>
+        /// Inversión inicial convertida a la divisa base (sin redondear) de cada empresa incluida,
+        /// por Id de empresa (SPEC-01-06: peso de cada empresa en la cartera)
+        /// </summary>
+        public Dictionary<int, decimal> InitialByCompanyId { get; set; } = new();
     }
 
     /// <summary>
-    /// Totales del histórico de ventas convertidos a la divisa base con el tipo actual
+    /// Totales del histórico de ventas convertidos a la divisa base con los tipos guardados (SPEC-02-05)
     /// </summary>
     public class ConvertedSaleTotals
     {
@@ -83,8 +89,11 @@ namespace FINANCEAPP.Services
         /// <summary>Ventas en otra divisa sin tipo actual: quedan fuera de los totales</summary>
         public int MissingRateSales { get; set; }
 
-        /// <summary>Ventas en otra divisa convertidas con el tipo actual</summary>
+        /// <summary>Ventas en otra divisa convertidas con los tipos guardados en la venta y en sus compras (SPEC-02-05)</summary>
         public int ConvertedSales { get; set; }
+
+        /// <summary>Ventas en otra divisa en las que algún tipo no estaba guardado y se usó el tipo actual (SPEC-02-05)</summary>
+        public int ApproximateSales { get; set; }
     }
 
     /// <summary>
@@ -147,7 +156,8 @@ namespace FINANCEAPP.Services
 
         /// <summary>
         /// Totales del histórico de ventas (importe, comisiones y beneficio) convertidos a la divisa base
-        /// con el tipo actual. La divisa de cada venta es la de su empresa (EUR si no se encuentra).
+        /// con el tipo guardado en la Venta y en cada compra cerrada (SPEC-02-05); si falta alguno se usa el
+        /// tipo actual y la venta cuenta como aproximada. La divisa de cada venta es la de su empresa (EUR si no se encuentra).
         /// </summary>
         /// <param name="sales">Ventas del histórico</param>
         /// <param name="currencyByCompany">Divisa de cada empresa por nombre</param>

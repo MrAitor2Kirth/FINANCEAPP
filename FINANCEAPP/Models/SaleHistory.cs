@@ -45,9 +45,10 @@ namespace FINANCEAPP.Models
         /// <summary>
         /// Número de acciones vendidas
         /// </summary>
-        [Range(1, int.MaxValue, ErrorMessage = "El número de acciones debe ser mayor que 0")]
+        [Column(TypeName = "decimal(18,2)")]
+        [Range(typeof(decimal), "0.01", "999999999.99", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true, ErrorMessage = "El número de acciones debe ser mayor que 0")]
         [Display(Name = "Número de acciones")]
-        public int NumberOfShares { get; set; }
+        public decimal NumberOfShares { get; set; }
 
         /// <summary>
         /// Precio medio ponderado de compra de las acciones vendidas
@@ -94,5 +95,19 @@ namespace FINANCEAPP.Models
         /// Fecha de la última modificación del registro
         /// </summary>
         public DateTime UpdatedAt { get; set; } = DateTime.Now;
+
+        /// <summary>
+        /// Rentabilidad de la venta en porcentaje (SPEC-02-04): beneficio ÷ (precio medio de compra × acciones) × 100,
+        /// con 2 decimales. Null si el coste de compra es 0. Se calcula al leer.
+        /// </summary>
+        [NotMapped]
+        public decimal? ReturnPercent
+        {
+            get
+            {
+                var cost = AverageBuyPrice * NumberOfShares;
+                return cost > 0 ? Math.Round(Profit / cost * 100, 2) : null;
+            }
+        }
     }
 }

@@ -2,6 +2,7 @@
 @using FINANCEAPP.Services
 @using Microsoft.Extensions.Logging
 @inject ILogger<BankOperationsList> Logger
+@inject IJSRuntime JSRuntime
 
 @if (operations == null)
 {
@@ -32,52 +33,60 @@ else
                             <span class="badge @GetOperationBadgeClass(op.Type)">@op.Type</span>
                         </td>
                         <td class="text-end fw-bold">@op.Amount.ToString("C")</td>
-                        <td>@op.Description</td>
+                        <td>
+                            @if (op.SaleHistoryId.HasValue)
+                            {
+                                <span class="badge bg-primary me-1" title="Ingreso generado por una venta de acciones: se cambia desde «Histórico de ventas»">Venta nº @op.SaleHistoryId</span>
+                            }
+                            @if (op.TransferId.HasValue && transferCounterparts.TryGetValue(op.TransferId.Value, out var otherAccount))
+                            {
+                                <span class="badge bg-secondary me-1" title="Las dos patas del traspaso se editan (importe y fecha) y se borran juntas">Traspaso ↔ @otherAccount</span>
+                            }
+                            @op.Description
+                        </td>
                         <td>@op.Date.ToString("dd/MM/yyyy")</td>
                         <td>
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteOperation(op.Id)">
+                            <button class="btn btn-sm btn-outline-secondary" disabled="@isSaving" @onclick="() => StartEdit(op)">
+                                Editar
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" disabled="@(isSaving || editingId == op.Id)" @onclick="() => DeleteOperation(op.Id)">
                                 Eliminar
                             </button>
                         </td>
                     </tr>
+                    @if (editingId == op.Id)
+                    {
+                        <tr class="bank-edit-row">
+                            <td colspan="5">
+                                <h6 class="mb-2">Editar operación</h6>
+                                @OperationForm
+                            </td>
+                        </tr>
+                    }
+                    else if (lockedId == op.Id)
+                    {
+                        <tr class="bank-edit-row">
+                            <td colspan="5">
+                                <div class="alert alert-info py-2 mb-0 d-flex justify-content-between align-items-center">
+                                    <span><i class="bi bi-lock-fill me-1"></i>@lockedMessage</span>
+                                    <button type="button" class="btn-close" aria-label="Cerrar" @onclick="CancelEdit"></button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
                 }
             </tbody>
         </table>
     </div>
 }
 
-<div class="mt-3">
-    <h6>Nueva Operación</h6>
-    <div class="row g-2">
-        <div class="col-md-3">
-            <select class="form-select form-select-sm" @bind="newOperation.Type">
-                <option value="">Seleccionar tipo...</option>
-                <option value="Ingreso">Ingreso</option>
-                <option value="Gasto">Gasto</option>
-                <option value="Intereses">Intereses</option>
-                <option value="Comisiones">Comisiones</option>
-                <option value="Traspaso Entrada">Traspaso Entrada</option>
-                <option value="Traspaso Salida">Traspaso Salida</option>
-            </select>
-        </div>
-        <div class="col-md-3">
-            <input type="number" class="form-control form-control-sm" placeholder="Cantidad" 
-                   @bind="newOperation.Amount" step="0.01" />
-        </div>
-        <div class="col-md-3">
-            <input type="date" class="form-control form-control-sm" @bind="newOperation.Date" />
-        </div>
-        <div class="col-md-3">
-            <button class="btn btn-sm btn-primary w-100" @onclick="AddOperation">Añadir</button>
-        </div>
+@if (editingId == null)
+{
+    <div class="mt-3">
+        <h6>Nueva operación</h6>
+        @OperationForm
     </div>
-    <div class="row g-2 mt-2">
-        <div class="col-12">
-            <input type="text" class="form-control form-control-sm" placeholder="Descripción (opcional)" 
-                   @bind="newOperation.Description" />
-        </div>
-    </div>
-</div>
+}
 
 @code {
     [Parameter]
@@ -90,7 +99,74 @@ else
     public EventCallback OnOperationAdded { get; set; }
 
     private List<BankOperation> operations = new();
-    private BankOperation newOperation = new();
+
+    // Traspasos entre cuentas (SPEC-10-02): TransferId → cuenta de la otra pata (solo si la pareja existe)
+    private Dictionary<int, string> transferCounterparts = new();
+
+    // El tipo de una pata de traspaso no se cambia al editarla
+    private bool editingTransferLeg =>
+        editingId != null
+        && operations.FirstOrDefault(o => o.Id == editingId)?.TransferId is int transferId
+        && transferCounterparts.ContainsKey(transferId);
+
+    // Campos del formulario (se usan para alta y para edición)
+    private string type = string.Empty;
+    private decimal? amount;
+    private DateTime? date = DateTime.Today;
+    private string? description;
+
+    private int? editingId;
+    private bool isSaving;
+
+    // Movimiento que no se edita desde aquí (venta, compra o dividendo) y su motivo, bajo su fila
+    private int? lockedId;
+    private string? lockedMessage;
+
+    // Formulario común de alta y edición: en edición se pinta bajo la fila, para que se vea al pulsar «Editar»
+    private RenderFragment OperationForm => __builder =>
+    {
+        <div class="row g-2">
+            <div class="col-md-3">
+                <select class="form-select form-select-sm" @bind="type" disabled="@editingTransferLeg">
+                    <option value="">Seleccionar tipo...</option>
+                    <option value="Ingreso">Ingreso</option>
+                    <option value="Gasto">Gasto</option>
+                    <option value="Intereses">Intereses</option>
+                    <option value="Comisiones">Comisiones</option>
+                    <option value="Traspaso Entrada">Traspaso Entrada</option>
+                    <option value="Traspaso Salida">Traspaso Salida</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <input type="number" class="form-control form-control-sm" placeholder="Cantidad (en positivo)"
+                       @bind="amount" step="0.01" />
+            </div>
+            <div class="col-md-3">
+                <input type="date" class="form-control form-control-sm" @bind="date" />
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-sm btn-primary" disabled="@isSaving" @onclick="SaveOperation">
+                    @(editingId == null ? "Añadir" : "Guardar cambios")
+                </button>
+                @if (editingId != null)
+                {
+                    <button class="btn btn-sm btn-outline-secondary ms-1" disabled="@isSaving" @onclick="CancelEdit">Cancelar</button>
+                }
+            </div>
+        </div>
+        <div class="row g-2 mt-2">
+            <div class="col-12">
+                <input type="text" class="form-control form-control-sm" placeholder="Descripción (opcional)"
+                       @bind="description" />
+            </div>
+        </div>
+        @if (!string.IsNullOrEmpty(message))
+        {
+            <div class="alert @(messageIsError ? "alert-danger" : "alert-success") py-2 mt-2 mb-0" role="alert">@message</div>
+        }
+    };
+    private string? message;
+    private bool messageIsError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -102,6 +178,9 @@ else
         try
         {
             operations = await BankService.GetOperationsByAccountNameAsync(AccountName);
+            transferCounterparts = await BankService.GetTransferCounterpartsAsync(
+                operations.Where(o => o.TransferId.HasValue).Select(o => o.TransferId!.Value),
+                AccountName);
         }
         catch (Exception ex)
         {
@@ -109,38 +188,140 @@ else
         }
     }
 
-    private async Task AddOperation()
+    private void ResetForm()
     {
-        if (string.IsNullOrEmpty(newOperation.Type) || newOperation.Amount <= 0)
+        type = string.Empty;
+        amount = null;
+        date = DateTime.Today;
+        description = null;
+        editingId = null;
+        lockedId = null;
+        lockedMessage = null;
+    }
+
+    private void ShowMessage(string text, bool isError)
+    {
+        message = text;
+        messageIsError = isError;
+    }
+
+    private async Task StartEdit(BankOperation op)
+    {
+        message = null;
+
+        // Ingresos de ventas y movimientos de compras o dividendos se cambian desde su origen (regla de BankService)
+        var lockText = await BankService.GetEditLockMessageAsync(op);
+        if (lockText != null)
+        {
+            ResetForm();
+            lockedId = op.Id;
+            lockedMessage = lockText;
+            return;
+        }
+
+        lockedId = null;
+        lockedMessage = null;
+        editingId = op.Id;
+        type = op.Type;
+        amount = Math.Abs(op.Amount);
+        date = op.Date;
+        description = op.Description;
+        message = null;
+    }
+
+    private void CancelEdit()
+    {
+        ResetForm();
+        message = null;
+    }
+
+    private async Task SaveOperation()
+    {
+        if (isSaving)
         {
             return;
         }
 
+        isSaving = true;
+        message = null;
+
         try
         {
-            newOperation.AccountName = AccountName;
-            await BankService.CreateOperationAsync(newOperation);
-            newOperation = new();
+            // Las reglas de validación viven en BankService; aquí solo se recogen los datos
+            var operation = new BankOperation
+            {
+                Id = editingId ?? 0,
+                AccountName = AccountName,
+                Type = type,
+                Amount = amount ?? 0,
+                Date = date ?? default,
+                Description = description
+            };
+
+            var wasEditing = editingId != null;
+            if (wasEditing)
+            {
+                await BankService.UpdateOperationAsync(operation);
+            }
+            else
+            {
+                await BankService.CreateOperationAsync(operation);
+            }
+
+            ResetForm();
             await LoadOperations();
+            ShowMessage(wasEditing ? "Operación actualizada." : "Operación añadida.", false);
             await OnOperationAdded.InvokeAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            ShowMessage(ex.Message, true);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error añadiendo operación");
+            Logger.LogError(ex, "Error guardando operación");
+            ShowMessage("No se pudo guardar la operación. Inténtalo de nuevo.", true);
+        }
+        finally
+        {
+            isSaving = false;
         }
     }
 
     private async Task DeleteOperation(int operationId)
     {
+        // Una pata de traspaso se borra junto a la otra (SPEC-10-02): el aviso lo dice
+        var transferId = operations.FirstOrDefault(o => o.Id == operationId)?.TransferId;
+        var confirmText = transferId.HasValue && transferCounterparts.TryGetValue(transferId.Value, out var otherAccount)
+            ? $"¿Eliminar este traspaso? También se eliminará el movimiento de la cuenta «{otherAccount}» y los dos saldos se recalcularán."
+            : "¿Eliminar este movimiento? El saldo de la cuenta se recalculará.";
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", confirmText))
+        {
+            return;
+        }
+
+        isSaving = true;
+        message = null;
+
         try
         {
             await BankService.DeleteOperationAsync(operationId);
             await LoadOperations();
+            ShowMessage("Operación eliminada.", false);
             await OnOperationAdded.InvokeAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            ShowMessage(ex.Message, true);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error eliminando operación");
+            ShowMessage("No se pudo eliminar la operación. Inténtalo de nuevo.", true);
+        }
+        finally
+        {
+            isSaving = false;
         }
     }
 

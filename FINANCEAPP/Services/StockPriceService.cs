@@ -5,11 +5,17 @@ namespace FINANCEAPP.Services
 {
     public class StockPriceService : IStockPriceService
     {
+        /// <summary>
+        /// true si se prueban los sufijos de bolsa: el ticker no lleva sufijo y no es un índice (^IBEX), un futuro
+        /// o una divisa (GC=F, EURUSD=X), que se escriben siempre completos (SPEC-05-04)
+        /// </summary>
+        internal static bool CanTrySuffixes(string ticker) => !ticker.Contains('.') && !ticker.StartsWith('^') && !ticker.Contains('=');
+
         // Sufijos de bolsas no estadounidenses habitualmente usados por Yahoo Finance.
         // Se prueban cuando el ticker "plano" (sin sufijo) no devuelve resultado, ya que
         // muchas empresas europeas (p.ej. ACS -> ACS.MC, Airbus -> AIR.PA) requieren el sufijo
         // de su bolsa de cotización para poder identificarse en Yahoo Finance.
-        private static readonly string[] ExchangeSuffixFallbacks =
+        internal static readonly string[] ExchangeSuffixFallbacks =
         {
             ".MC", // Bolsa de Madrid
             ".PA", // Euronext Paris
@@ -179,7 +185,7 @@ namespace FINANCEAPP.Services
             var quote = await GetQuoteFromChartEndpointAsync(normalizedTicker);
 
             // Igual que el precio en vivo: si el ticker no lleva sufijo de bolsa, se prueban los habituales
-            if (quote == null && !normalizedTicker.Contains('.'))
+            if (quote == null && CanTrySuffixes(normalizedTicker))
             {
                 foreach (var suffix in ExchangeSuffixFallbacks)
                 {
@@ -355,52 +361,245 @@ namespace FINANCEAPP.Services
                     return bars;
                 }
 
-                var firstResult = resultArray[0];
-
-                if (!firstResult.TryGetProperty("timestamp", out var timestamps) || timestamps.ValueKind != JsonValueKind.Array)
-                {
-                    return bars;
-                }
-
-                if (!firstResult.TryGetProperty("indicators", out var indicators) ||
-                    !indicators.TryGetProperty("quote", out var quoteArray) || quoteArray.ValueKind != JsonValueKind.Array || quoteArray.GetArrayLength() == 0)
-                {
-                    return bars;
-                }
-
-                var quote = quoteArray[0];
-                quote.TryGetProperty("open", out var opens);
-                quote.TryGetProperty("high", out var highs);
-                quote.TryGetProperty("low", out var lows);
-                quote.TryGetProperty("close", out var closes);
-                quote.TryGetProperty("volume", out var volumes);
-
-                var count = timestamps.GetArrayLength();
-                for (var i = 0; i < count; i++)
-                {
-                    if (!TryGetDecimal(opens, i, out var open) ||
-                        !TryGetDecimal(highs, i, out var high) ||
-                        !TryGetDecimal(lows, i, out var low) ||
-                        !TryGetDecimal(closes, i, out var close))
-                    {
-                        // Sesión sin datos (día festivo dentro del rango); se omite.
-                        continue;
-                    }
-
-                    var unixSeconds = timestamps[i].GetInt64();
-                    var date = DateTimeOffset.FromUnixTimeSeconds(unixSeconds).UtcDateTime.Date;
-                    var volume = TryGetInt64(volumes, i, out var vol) ? vol : 0L;
-
-                    bars.Add(new StockHistoryBar(date, open, high, low, close, volume));
-                }
-
-                return bars;
+                return ParseBars(resultArray[0], intraday: false);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error al consultar histórico de Yahoo Finance para el ticker {Ticker}", ticker);
                 return bars;
             }
+        }
+
+        public async Task<StockHistoryChunk> GetHistoryRangeAsync(string ticker, string interval, DateTime fromUtc, DateTime toUtc, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(ticker))
+            {
+                return new StockHistoryChunk();
+            }
+
+            var normalizedTicker = ticker.Trim();
+            var chunk = await GetRangeFromChartEndpointAsync(normalizedTicker, interval, fromUtc, toUtc, cancellationToken);
+
+            // Solo se prueban los sufijos si Yahoo no reconoce el símbolo; un fallo de red no se repite 9 veces
+            if (!chunk.Failed && !chunk.SymbolFound && CanTrySuffixes(normalizedTicker))
+            {
+                foreach (var suffix in ExchangeSuffixFallbacks)
+                {
+                    var candidate = await GetRangeFromChartEndpointAsync(normalizedTicker + suffix, interval, fromUtc, toUtc, cancellationToken);
+                    if (candidate.Failed || candidate.SymbolFound)
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return chunk;
+        }
+
+        private async Task<StockHistoryChunk> GetRangeFromChartEndpointAsync(string ticker, string interval, DateTime fromUtc, DateTime toUtc, CancellationToken cancellationToken)
+        {
+            var period1 = ToUnixSeconds(fromUtc);
+            var period2 = ToUnixSeconds(toUtc);
+            var url = $"https://query1.finance.yahoo.com/v8/finance/chart/{Uri.EscapeDataString(ticker)}?interval={Uri.EscapeDataString(interval)}&period1={period1}&period2={period2}";
+            var chunk = new StockHistoryChunk();
+
+            try
+            {
+                using var response = await _httpClient.GetAsync(url, cancellationToken);
+                var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    // 404 = símbolo desconocido (no es un fallo de red); el resto se trata como fallo
+                    chunk.Failed = response.StatusCode != System.Net.HttpStatusCode.NotFound;
+                    _logger.LogWarning(
+                        "Yahoo Finance respondió con estado {StatusCode} para el tramo {Interval} de {Ticker}. Cuerpo: {Body}",
+                        response.StatusCode, interval, ticker, Truncate(payload));
+                    return chunk;
+                }
+
+                using var doc = JsonDocument.Parse(payload);
+
+                if (!doc.RootElement.TryGetProperty("chart", out var chart) ||
+                    (chart.TryGetProperty("error", out var errorNode) && errorNode.ValueKind != JsonValueKind.Null) ||
+                    !chart.TryGetProperty("result", out var resultArray) ||
+                    resultArray.ValueKind != JsonValueKind.Array || resultArray.GetArrayLength() == 0)
+                {
+                    return chunk;
+                }
+
+                var firstResult = resultArray[0];
+                if (firstResult.TryGetProperty("meta", out var meta))
+                {
+                    chunk.SymbolFound = true;
+                    chunk.Symbol = ReadString(meta, "symbol") ?? ticker;
+
+                    // firstTradeDate puede ser negativo (empresas que cotizan desde antes de 1970)
+                    if (meta.TryGetProperty("firstTradeDate", out var firstTrade) &&
+                        firstTrade.ValueKind == JsonValueKind.Number && firstTrade.TryGetInt64(out var firstTradeSeconds))
+                    {
+                        chunk.FirstTradeDateUtc = DateTimeOffset.FromUnixTimeSeconds(firstTradeSeconds).UtcDateTime;
+                    }
+                }
+
+                chunk.Bars = ParseBars(firstResult, intraday: interval != "1d");
+                return chunk;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Cancelación pedida (se cerró el modal): no es un error
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al consultar el tramo {Interval} de Yahoo Finance para el ticker {Ticker}", interval, ticker);
+                chunk.Failed = true;
+                return chunk;
+            }
+        }
+
+        public async Task<StockDividendLookup> GetLastDividendAsync(string ticker)
+        {
+            if (string.IsNullOrWhiteSpace(ticker))
+            {
+                return new StockDividendLookup();
+            }
+
+            var normalizedTicker = ticker.Trim();
+            var (lookup, found) = await GetLastDividendFromChartEndpointAsync(normalizedTicker);
+
+            // Igual que el histórico: los sufijos solo se prueban si Yahoo no reconoce el símbolo
+            if (!lookup.Failed && !found && !normalizedTicker.Contains('.'))
+            {
+                foreach (var suffix in ExchangeSuffixFallbacks)
+                {
+                    var (candidate, candidateFound) = await GetLastDividendFromChartEndpointAsync(normalizedTicker + suffix);
+                    if (candidate.Failed || candidateFound)
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return lookup;
+        }
+
+        private async Task<(StockDividendLookup Lookup, bool SymbolFound)> GetLastDividendFromChartEndpointAsync(string ticker)
+        {
+            var url = $"https://query1.finance.yahoo.com/v8/finance/chart/{Uri.EscapeDataString(ticker)}?interval=1d&range=5y&events=div";
+            var lookup = new StockDividendLookup();
+
+            try
+            {
+                using var response = await _httpClient.GetAsync(url);
+                var payload = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    lookup.Failed = response.StatusCode != System.Net.HttpStatusCode.NotFound;
+                    _logger.LogWarning("Yahoo Finance respondió con estado {StatusCode} a los dividendos de {Ticker}. Cuerpo: {Body}",
+                        response.StatusCode, ticker, Truncate(payload));
+                    return (lookup, false);
+                }
+
+                using var doc = JsonDocument.Parse(payload);
+                if (!doc.RootElement.TryGetProperty("chart", out var chart) ||
+                    (chart.TryGetProperty("error", out var errorNode) && errorNode.ValueKind != JsonValueKind.Null) ||
+                    !chart.TryGetProperty("result", out var resultArray) ||
+                    resultArray.ValueKind != JsonValueKind.Array || resultArray.GetArrayLength() == 0)
+                {
+                    return (lookup, false);
+                }
+
+                var firstResult = resultArray[0];
+                var found = firstResult.TryGetProperty("meta", out _);
+
+                // events.dividends es un objeto { "<unix>": { "amount": 0.25, "date": <unix> } }
+                if (firstResult.TryGetProperty("events", out var events) &&
+                    events.TryGetProperty("dividends", out var dividends) &&
+                    dividends.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var entry in dividends.EnumerateObject())
+                    {
+                        var dividend = entry.Value;
+                        var amount = ReadDecimal(dividend, "amount");
+                        if (!amount.HasValue ||
+                            !dividend.TryGetProperty("date", out var dateNode) ||
+                            dateNode.ValueKind != JsonValueKind.Number ||
+                            !dateNode.TryGetInt64(out var seconds))
+                        {
+                            continue;
+                        }
+
+                        var date = DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime.Date;
+                        if (lookup.Last == null || date > lookup.Last.Date)
+                        {
+                            lookup.Last = new StockDividend(date, amount.Value);
+                        }
+                    }
+                }
+
+                return (lookup, found);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al consultar los dividendos de Yahoo Finance para el ticker {Ticker}", ticker);
+                lookup.Failed = true;
+                return (lookup, false);
+            }
+        }
+
+        /// <summary>
+        /// Lee las barras OHLC de un resultado de v8/finance/chart. En diario la fecha va sin hora (como hasta ahora);
+        /// en barras de una hora se usa la hora local de Windows (SPEC-05-02, D5).
+        /// </summary>
+        private static List<StockHistoryBar> ParseBars(JsonElement firstResult, bool intraday)
+        {
+            var bars = new List<StockHistoryBar>();
+
+            if (!firstResult.TryGetProperty("timestamp", out var timestamps) || timestamps.ValueKind != JsonValueKind.Array)
+            {
+                return bars;
+            }
+
+            if (!firstResult.TryGetProperty("indicators", out var indicators) ||
+                !indicators.TryGetProperty("quote", out var quoteArray) || quoteArray.ValueKind != JsonValueKind.Array || quoteArray.GetArrayLength() == 0)
+            {
+                return bars;
+            }
+
+            var quote = quoteArray[0];
+            quote.TryGetProperty("open", out var opens);
+            quote.TryGetProperty("high", out var highs);
+            quote.TryGetProperty("low", out var lows);
+            quote.TryGetProperty("close", out var closes);
+            quote.TryGetProperty("volume", out var volumes);
+
+            var count = timestamps.GetArrayLength();
+            for (var i = 0; i < count; i++)
+            {
+                if (!TryGetDecimal(opens, i, out var open) ||
+                    !TryGetDecimal(highs, i, out var high) ||
+                    !TryGetDecimal(lows, i, out var low) ||
+                    !TryGetDecimal(closes, i, out var close))
+                {
+                    // Sesión sin datos (día festivo dentro del rango); se omite.
+                    continue;
+                }
+
+                var moment = DateTimeOffset.FromUnixTimeSeconds(timestamps[i].GetInt64());
+                var date = intraday ? moment.LocalDateTime : moment.UtcDateTime.Date;
+                var volume = TryGetInt64(volumes, i, out var vol) ? vol : 0L;
+
+                bars.Add(new StockHistoryBar(date, open, high, low, close, volume));
+            }
+
+            return bars;
+        }
+
+        private static long ToUnixSeconds(DateTime utc)
+        {
+            return new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeSeconds();
         }
 
         private static bool TryGetDecimal(JsonElement array, int index, out decimal value)

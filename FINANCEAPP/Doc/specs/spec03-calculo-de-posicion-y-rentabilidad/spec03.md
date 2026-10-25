@@ -27,6 +27,7 @@ Mantiene actualizados los totales de cada empresa a partir de sus operaciones, d
 - **Rentabilidad plusvalía %** = (valor invertido − invertido inicial) / invertido inicial × 100.
 - **Rentabilidad con dividendos %** = (valor invertido + dividendos − invertido inicial) / invertido inicial × 100.
 - Si el total invertido inicial es ≤ 0, ambas rentabilidades valen 0.
+- **Rentabilidad media de `/companies`** (SPEC-01-05): (Σ valor actual − Σ invertido) ÷ Σ invertido × 100 de las empresas con inversión, convertidas a la divisa base; es la rentabilidad por precio ponderada por la inversión y no incluye dividendos.
 - El recálculo se ejecuta tras cualquier alta, edición o baja de operación y al guardar la empresa; actualiza `UpdatedAt`.
 
 ## 4. Datos implicados
@@ -65,3 +66,5 @@ Mantiene actualizados los totales de cada empresa a partir de sus operaciones, d
 - Al deshacer una venta (SPEC-02-03) las compras vuelven a quedar abiertas, se unen las filas partidas y la empresa se recalcula con el mismo método; no cambia ninguna fórmula.
 - [SPEC-01-01 · Precio medio de compra y lista extendida](../spec01-gestion-de-empresas/spec01-01-average-price-extended-list/spec01-01.md): añade el valor derivado no persistido «precio medio de compra» = total invertido inicial ÷ número de acciones (sin valor si no hay acciones o el invertido es ≤ 0); no cambia ninguna fórmula existente (estado: implementada, pendiente de compilar y probar a mano).
 - [SPEC-17-02 · Informe fiscal anual para la Renta](../spec17-patrimonio-global-y-distribucion/spec17-02-tax-report/spec17-02.md): las retenciones del Dividendo son solo informativas; `TotalDividends` y las rentabilidades siguen usando el importe neto (estado: plan aprobado, pendiente de implementar después de SPEC-17-01).
+- [SPEC-21-01 · Calendario de dividendos](../spec21-dividend-calendar/spec21-01-dividend-calendar/spec21-01.md): las líneas de dividendo no cambian ninguna fórmula; `TotalDividends` solo cambia cuando el usuario genera la operación de Dividendo (estado: implementada y compilada, pendiente de probar a mano).
+- [SPEC-02-08 · Número de acciones con decimales](../spec02-operaciones-de-acciones/spec02-08-fractional-shares/spec02-08.md): las acciones en cartera son la suma de cantidades con hasta 2 decimales (redondeada a 2); el precio medio y el valor de cartera no cambian de fórmula.

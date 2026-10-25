@@ -32,6 +32,8 @@ Permite registrar cada movimiento de la cartera de acciones y consultarlos en un
 - **Compra y Venta desde el gráfico** (SPEC-05-01): pasan por `OperationService.RegisterQuickTradeAsync`, que revalida el bloqueo (fecha futura, fecha de hoy con mercado cerrado, venta sin acciones), calcula el importe con `OperationAmountCalculator` y guarda con `AddAsync` (Compra) o `RegisterSaleAsync` (Venta).
 - Orden por defecto: fecha descendente.
 - **Una Venta nueva se registra con `RegisterSaleAsync`** (SPEC-02-01): exige empresa existente, precio por acción > 0 y acciones > 0, y cierra por **FIFO** (fecha e Id) las compras y traspasos abiertos de la empresa con la fecha de la venta. La propia Venta también queda cerrada.
+- **Movimientos bancarios de Compras y Dividendos** (SPEC-02-06): una Compra nueva genera un Gasto (su importe guardado, convertido a la divisa base) y un Dividendo nuevo un Ingreso, en la cuenta elegida o en la más antigua; «No registrar en banco» los evita y, sin cuentas, se guardan sin movimiento. El movimiento se enlaza por `BankOperations.OperationId` (en una compra partida por una venta, al lote original, con la suma de sus filas), sigue a la operación al editarla o borrarla y se bloquea en `/banco`. No se puede cambiar el tipo de una operación con movimiento. Las operaciones anteriores no se tocan.
+- **Cuenta editable** (SPEC-02-07): al editar una Compra o Dividendo se puede pasar su movimiento a otra cuenta o asignarlo si la operación está abierta y no lo tenía; no se puede quitar. La columna «Cuenta bancaria» solo se ve al crear o editar.
 - Si una compra se cierra solo en parte, se **divide en dos filas**: una cerrada con las acciones vendidas y otra abierta duplicada con las pendientes. Importe y comisión se reparten proporcionalmente y la parte pendiente se queda con el resto del redondeo.
 - Se rechaza la venta, sin cambiar nada, si las acciones a vender superan las disponibles (compras abiertas menos acciones de ventas antiguas que sigan abiertas). Todo ocurre en una transacción.
 - **Histórico de ventas** (`SalesHistory`): por cada venta se guarda el ticker, las acciones, el precio medio ponderado de compra, el precio de venta, el importe cobrado, las comisiones (la de la venta más la parte proporcional de las compras cerradas) y el beneficio = importe − coste medio × acciones − comisiones. El precio de venta es el precio por acción de la Venta si está informado y, si no, el «Precio en vivo» de la fila.
@@ -41,12 +43,15 @@ Permite registrar cada movimiento de la cartera de acciones y consultarlos en un
 - **Tipo de cambio** (SPEC-01-03): en empresas de otra divisa, la fila en edición muestra «Tipo de cambio», precargado con el tipo actual (se conserva el guardado al editar), editable y opcional; se guarda en `ExchangeRate` y `ExchangeRateTo`. La venta parcial lo copia a la fila pendiente. Un botón «Detalles», junto a editar y eliminar en todas las operaciones, muestra importe y comisión; en otra divisa, originales y convertidos con el tipo de la operación (o el actual, rotulado como orientativo), y en la divisa base una sola columna.
 - Los errores de validación y de acciones insuficientes se muestran en pantalla.
 - Cada alta, edición o baja **recalcula automáticamente** la posición de la empresa (SPEC-03); si al editar se cambia de empresa se recalculan ambas.
+- **Ingreso en el banco** (SPEC-02-04): toda Venta nueva (desde `/operations` o desde el gráfico) ingresa, en la misma transacción, un movimiento «Ingreso» con la liquidez neta (precio de venta × acciones − comisión de la propia venta, convertida a la divisa base con el tipo de la venta) en la cuenta elegida en el campo «Cuenta bancaria» o, si queda vacío, en la más antigua. Sin cuentas bancarias, sin tipo de cambio en otra divisa o con neto ≤ 0, la venta se rechaza. El ingreso queda enlazado por `BankOperations.SaleHistoryId`: deshacer la venta lo borra, editar el precio en el histórico lo actualiza y no se edita ni borra desde `/banco`. Las ventas anteriores se ingresan con «Ingresar en banco» en `/sales-history`.
+
+- **Número de acciones con decimales** (SPEC-02-08): las acciones de una operación admiten hasta **2 decimales** (acciones fraccionadas). Compra y Venta exigen más de 0; el importe, el FIFO, el neto de la venta y los movimientos bancarios usan la cantidad tal cual, y se muestran con los decimales que tengan (`ShareQuantity.Format`: 12 · 12,5 · 0,25).
 
 ## 4. Datos implicados
 
 - `Operation.SaleHistoryId` (Id del registro que cerró la compra) y `Operation.OriginOperationId` (origen común de las filas de un lote partido), ambos nulos y sin clave foránea, añadidos desde `DatabaseSchemaUpgrader.EnsureOperationSaleColumns`.
 - `SaleHistory` (tabla `SalesHistory`, creada solo desde `DatabaseSchemaUpgrader`): Id, OperationId (sin clave foránea), CompanyName, Ticker, SaleDate, NumberOfShares, AverageBuyPrice, SellPrice, Amount, Commission, Profit, CreatedAt, UpdatedAt. Índices por empresa y fecha.
-- `Operation`: Id, CompanyName, Date, CloseDate, PricePerShare, NumberOfShares, Commission, Amount, Type, CurrencyCode (nulo = EUR), CreatedAt (calculados: IsClosed, Status, EffectiveCurrencyCode).
+- `Operation`: Id, CompanyName, Date, CloseDate, PricePerShare, NumberOfShares (decimal, 2 decimales), Commission, Amount, Type, CurrencyCode (nulo = EUR), CreatedAt (calculados: IsClosed, Status, EffectiveCurrencyCode).
 - Índices en CompanyName, Date y Type.
 
 ## 5. Flujo principal
@@ -83,6 +88,8 @@ Permite registrar cada movimiento de la cartera de acciones y consultarlos en un
 - [ ] Reabrir una compra cerrada por una venta la desvincula: al deshacer esa venta, la compra no cambia.
 - [ ] La columna «Cód. divisa» muestra código y símbolo de cada operación; una operación nueva toma la divisa de su empresa y la parcial conserva la divisa (SPEC-01-02).
 - [ ] En modo edición, cambiar Estado a Cerrada pone la fecha de hoy y a Abierta la borra; al guardar cambian las acciones y el total invertido de la empresa.
+- [ ] Una Venta nueva ingresa el neto en la cuenta elegida o en la más antigua y deshacerla lo borra (SPEC-02-04).
+- [ ] Una Compra nueva crea un Gasto y un Dividendo nuevo un Ingreso en la cuenta elegida; editar o borrar la operación actualiza o borra el movimiento (SPEC-02-06).
 
 ## 8. Observaciones y limitaciones detectadas
 
@@ -93,6 +100,10 @@ Permite registrar cada movimiento de la cartera de acciones y consultarlos en un
 
 ## 9. Features relacionadas
 
+- [SPEC-02-04 · Ingreso en cuenta bancaria al vender acciones](spec02-04-sale-bank-deposit/spec02-04.md): toda venta nueva ingresa el neto (precio × acciones − comisión, en divisa base) en la cuenta elegida o en la más antigua; deshacer la venta lo borra (estado: implementada y compilada, pendiente de probar a mano).
+- [SPEC-02-05 · Filtro por periodo en el histórico de ventas](spec02-05-sales-period-filter/spec02-05.md): tarjetas y listado de `/sales-history` por día, mes, año o total, convertidos con los tipos de cambio guardados en cada compra y venta (estado: implementada y compilada, pendiente de probar a mano).
+- [SPEC-02-06 · Movimientos bancarios al comprar acciones y cobrar dividendos](spec02-06-trade-bank-movements/spec02-06.md): toda Compra nueva genera un Gasto y todo Dividendo nuevo un Ingreso en la cuenta elegida o en la más antigua (o ninguno si se elige «No registrar en banco»); el movimiento sigue a la operación al editarla o borrarla (estado: implementada y compilada, pendiente de probar a mano).
+- [SPEC-02-07 · Cuenta bancaria editable de Compras y Dividendos, solo al crear o editar](spec02-07-trade-bank-account-edit/spec02-07.md): la columna «Cuenta bancaria» de `/operations` solo se ve al crear o editar; al editar se puede cambiar la cuenta del movimiento (pasa de una cuenta a otra) o asignarla a una operación abierta que no la tenía (estado: implementada y compilada, pendiente de probar a mano).
 | Feature | Estado | Documentos |
 |---|---|---|
 | [SPEC-02-01 · Histórico de ventas de acciones](spec02-01-sales-history/spec02-01.md) | Implementada, pendiente de probar a mano | [spec](spec02-01-sales-history/spec02-01.md) · [plan](spec02-01-sales-history/plan02-01.md) · [tareas](spec02-01-sales-history/task02-01.md) |
@@ -103,3 +114,5 @@ Permite registrar cada movimiento de la cartera de acciones y consultarlos en un
 | [SPEC-01-04 · Catálogo de empresas de mercado](../spec01-gestion-de-empresas/spec01-04-market-catalog/spec01-04.md) | Implementada, pendiente de compilar y probar a mano | [spec](../spec01-gestion-de-empresas/spec01-04-market-catalog/spec01-04.md) · [plan](../spec01-gestion-de-empresas/spec01-04-market-catalog/plan01-04.md) · [tareas](../spec01-gestion-de-empresas/spec01-04-market-catalog/task01-04.md) |
 - [SPEC-05-01 · Gráfico con precio en vivo y compra/venta](../spec05-grafico-de-cotizacion/spec05-01-chart-live-trading/spec05-01.md): crea Compras y Ventas desde el gráfico de cotización con las mismas reglas que `/operations` (estado: implementada, pendiente de compilar y probar a mano).
 - [SPEC-17-02 · Informe fiscal anual para la Renta](../spec17-patrimonio-global-y-distribucion/spec17-02-tax-report/spec17-02.md): el Dividendo añade «Retención en origen» y «Retención en España» (opcionales); el importe sigue siendo el neto cobrado y bruto = neto + retenciones. Las ventas del histórico alimentan el informe fiscal (estado: plan aprobado, pendiente de implementar después de SPEC-17-01).
+- [SPEC-21-01 · Calendario de dividendos](../spec21-dividend-calendar/spec21-01-dividend-calendar/spec21-01.md): la operación de Dividendo se puede generar desde una línea de dividendo (`AddAsync` con su movimiento bancario, importe = acciones × importe por acción, editable) y borrarla devuelve la línea a Pendiente (estado: implementada y compilada, pendiente de probar a mano).
+- [SPEC-02-08 · Número de acciones con decimales](spec02-08-fractional-shares/spec02-08.md): acciones con hasta 2 decimales en operaciones, empresa, histórico de ventas, gráfico y dividendos; sin cambio de fórmulas ni reconstrucción de tablas (estado: implementada y compilada, pendiente de probar a mano).

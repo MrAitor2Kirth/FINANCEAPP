@@ -51,8 +51,10 @@ namespace FINANCEAPP.Services
         /// Añade una nueva operación al sistema
         /// </summary>
         /// <param name="operation">Operación a añadir</param>
+        /// <param name="bankAccountName">Cuenta del movimiento bancario de una Compra o Dividendo (SPEC-02-06): vacía = la más antigua; <c>OperationAmountCalculator.NoBankMovementValue</c> = sin movimiento</param>
+        /// <param name="dividendPaymentId">Línea del calendario de dividendos que se cobra con esta operación (SPEC-21-01): se marca Cobrada en la misma transacción</param>
         /// <returns>La operación añadida con su Id asignado</returns>
-        Task<Operation> AddAsync(Operation operation);
+        Task<Operation> AddAsync(Operation operation, string? bankAccountName = null, int? dividendPaymentId = null);
 
         /// <summary>
         /// Registra una Venta de acciones: cierra por FIFO las compras abiertas de la empresa
@@ -61,8 +63,20 @@ namespace FINANCEAPP.Services
         /// </summary>
         /// <param name="sale">Operación de tipo Venta (precio por acción y acciones mayores que 0)</param>
         /// <param name="sellPrice">Precio de venta por acción para el histórico</param>
+        /// <param name="bankAccountName">Cuenta bancaria donde se ingresa la liquidez (SPEC-02-04); vacía = la más antigua</param>
         /// <returns>Resultado con éxito, mensaje de error e Id del registro de histórico</returns>
-        Task<SaleRegistrationResult> RegisterSaleAsync(Operation sale, decimal sellPrice);
+        Task<SaleRegistrationResult> RegisterSaleAsync(Operation sale, decimal sellPrice, string? bankAccountName = null);
+
+        /// <summary>
+        /// Ingresa en una cuenta bancaria una venta ya registrada que todavía no tiene ingreso (SPEC-02-04, RF-10).
+        /// Si la empresa no es de la divisa base y la Venta no tiene tipo de cambio, usa el indicado y lo guarda en la Venta.
+        /// </summary>
+        Task<SaleRegistrationResult> DepositExistingSaleAsync(int saleHistoryId, string? bankAccountName, decimal? exchangeRate);
+
+        /// <summary>
+        /// Datos que necesita la pantalla para ingresar una venta ya registrada: divisa y si hay que pedir el tipo de cambio
+        /// </summary>
+        Task<SaleDepositInfo?> GetSaleDepositInfoAsync(int saleHistoryId);
 
         /// <summary>
         /// Deshace una venta: reabre las compras que cerró, vuelve a unir los lotes partidos,
@@ -99,7 +113,7 @@ namespace FINANCEAPP.Services
         /// Ventas antiguas abiertas), mínimo 0. Misma cuenta que <see cref="RegisterSaleAsync"/>.
         /// </summary>
         /// <param name="companyName">Nombre de la empresa</param>
-        Task<int> GetAvailableSharesAsync(string companyName);
+        Task<decimal> GetAvailableSharesAsync(string companyName);
 
         /// <summary>
         /// Motivo en español por el que no se puede operar desde el gráfico, o null si se puede (SPEC-05-01, RF-6)
@@ -108,7 +122,8 @@ namespace FINANCEAPP.Services
         /// <param name="date">Fecha de la operación</param>
         /// <param name="marketState">Estado del mercado</param>
         /// <param name="availableShares">Acciones disponibles para vender</param>
-        string? GetQuickTradeBlockReason(string type, DateTime date, MarketState marketState, int availableShares);
+        /// <param name="hasBankAccounts">Si existe alguna cuenta bancaria (una Venta la necesita, SPEC-02-04)</param>
+        string? GetQuickTradeBlockReason(string type, DateTime date, MarketState marketState, decimal availableShares, bool hasBankAccounts);
 
         /// <summary>
         /// Registra una Compra (con <see cref="AddAsync"/>) o una Venta (con <see cref="RegisterSaleAsync"/>)
@@ -127,11 +142,12 @@ namespace FINANCEAPP.Services
         /// Actualiza una operación existente
         /// </summary>
         /// <param name="operation">Operación con los datos actualizados</param>
+        /// <param name="bankAccountName">Cuenta del movimiento de una Compra o Dividendo (SPEC-02-07): vacía = no cambia; un nombre = pasa el movimiento a esa cuenta o lo crea si la operación abierta no lo tenía; <c>OperationAmountCalculator.NoBankMovementValue</c> se rechaza si ya tiene movimiento</param>
         /// <returns>True si se actualizó correctamente</returns>
-        Task<bool> UpdateAsync(Operation operation);
+        Task<bool> UpdateAsync(Operation operation, string? bankAccountName = null);
 
         /// <summary>
-        /// Elimina una operación del sistema
+        /// Elimina una operación del sistema. Si generó una línea de dividendo, la línea vuelve a Pendiente (SPEC-21-01, RF-7)
         /// </summary>
         /// <param name="id">Identificador de la operación a eliminar</param>
         /// <returns>True si se eliminó correctamente</returns>
@@ -204,5 +220,20 @@ namespace FINANCEAPP.Services
 
         public static SaleUndoResult Fail(string message) =>
             new() { Success = false, ErrorMessage = message };
+    }
+
+    /// <summary>
+    /// Datos para ingresar en el banco una venta ya registrada (SPEC-02-04, RF-10)
+    /// </summary>
+    public class SaleDepositInfo
+    {
+        /// <summary>Divisa de la venta</summary>
+        public string CurrencyCode { get; set; } = CurrencyFormatter.DefaultCurrency;
+
+        /// <summary>Divisa base de la app (la de las cuentas bancarias)</summary>
+        public string BaseCurrencyCode { get; set; } = CurrencyFormatter.DefaultCurrency;
+
+        /// <summary>Indica si hay que pedir el tipo de cambio (otra divisa y la Venta no lo tiene)</summary>
+        public bool RequiresExchangeRate { get; set; }
     }
 }

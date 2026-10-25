@@ -49,3 +49,8 @@ Ofrece los datos agregados de cada cuenta (total de ingresos y total de gastos) 
 
 - Estas consultas existen en el servicio pero **no están expuestas aún con una pantalla propia** (no hay filtro de fechas en la interfaz bancaria); es una funcionalidad lista para usar.
 - Los traspasos entre cuentas propias cuentan como ingreso o gasto en estos totales.
+
+## 9. Features relacionadas
+
+- [SPEC-10-02 · Traspasos entre cuentas bancarias](../spec10-movimientos-bancarios-y-saldo/spec10-02-account-transfers/spec10-02.md): los traspasos entre cuentas siguen contando como ingresos (entrada) y gastos (salida) en los totales; no se excluyen (estado: implementada y compilada, pendiente de probar a mano).
+- [SPEC-10-01 · Corrección del alta, edición y borrado de movimientos](../spec10-movimientos-bancarios-y-saldo/spec10-01-bank-operations-fix/spec10-01.md): los movimientos se guardan con el signo del tipo (negativo en gastos, comisiones y traspasos de salida); los totales de ingresos y gastos no cambian de criterio.

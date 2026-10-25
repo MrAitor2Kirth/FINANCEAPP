@@ -234,6 +234,29 @@
                                     </div>
                                     <ValidationMessage For="@(() => company.DividendYield)" class="text-danger" />
                                 </div>
+
+                                <!-- Próxima fecha de dividendo (SPEC-21-01, RF-5) -->
+                                <div class="col-md-6 mb-3">
+                                    <label for="nextDividendDate" class="form-label fw-bold">
+                                        Próxima fecha de dividendo
+                                    </label>
+                                    <InputDate id="nextDividendDate"
+                                               class="form-control form-control-lg"
+                                               @bind-Value="company.NextDividendDate" />
+                                    <div class="form-text">
+                                        <i class="bi bi-info-circle me-1"></i>
+                                        Fecha de pago. Al guardar con una fecha nueva se crea su línea en
+                                        <a href="/dividends">Dividendos</a>; las anteriores no cambian.
+                                    </div>
+                                    @if (!string.IsNullOrEmpty(nextDividendStatus))
+                                    {
+                                        <div class="small mt-1">
+                                            Línea de esta fecha:
+                                            <span class="dividend-status @(nextDividendStatus == DividendPaymentRules.StatusCollected ? "collected" : "pending")">@nextDividendStatus</span>
+                                            · <a href="/dividends">Ver dividendos</a>
+                                        </div>
+                                    }
+                                </div>
                             </div>
 
                             @if (Id.HasValue)
@@ -252,7 +275,7 @@
                                     </div>
                                     <div class="col-md-6 col-lg-3 mb-3">
                                         <label class="form-label fw-bold">Número de Acciones</label>
-                                        <input class="form-control form-control-lg" value="@company.NumberOfShares" readonly />
+                                        <input class="form-control form-control-lg" value="@ShareQuantity.Format(company.NumberOfShares)" readonly />
                                         <small class="text-muted">
                                             <i class="bi bi-info-circle me-1"></i>
                                             Calculado a partir de las operaciones abiertas
@@ -387,6 +410,9 @@
     // Modelo de la empresa
     private CompanyDetail company = new();
 
+    // Estado de la línea de dividendo de la próxima fecha de la ficha (SPEC-21-01, RF-5)
+    private string? nextDividendStatus;
+
     // Estados del componente
     private bool isLoading = true;
     private bool isSaving = false;
@@ -429,6 +455,7 @@
                 if (existingCompany != null)
                 {
                     company = existingCompany;
+                    nextDividendStatus = await CompanyService.GetNextDividendStatusAsync(existingCompany.Id);
                 }
                 else
                 {

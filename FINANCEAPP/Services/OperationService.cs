@@ -13,18 +13,26 @@ namespace FINANCEAPP.Services
         private readonly AppDbContext _context;
         private readonly ICompanyService _companyService;
         private readonly ICountryService _countryService;
+        private readonly IBankService _bankService;
 
         /// <summary>
         /// Constructor que inyecta el contexto de base de datos
         /// </summary>
         /// <param name="context">Contexto de Entity Framework</param>
         /// <param name="companyService">Servicio de empresas para recalcular importes</param>
-        public OperationService(AppDbContext context, ICompanyService companyService, ICountryService countryService)
+        public OperationService(AppDbContext context, ICompanyService companyService, ICountryService countryService, IBankService bankService)
         {
             _context = context;
             _companyService = companyService;
             _countryService = countryService;
+            _bankService = bankService;
         }
+
+        /// <summary>
+        /// Mensaje cuando una venta en otra divisa no tiene tipo de cambio para ingresarla en el banco (SPEC-02-04)
+        /// </summary>
+        private static string MissingRateMessage(string baseCurrency) =>
+            $"Indica el tipo de cambio: el ingreso en la cuenta bancaria se hace en {baseCurrency}.";
 
         /// <summary>
         /// Normaliza el tipo de cambio de la operación (SPEC-01-03): en divisa base se borra; en otra divisa,
@@ -145,26 +153,144 @@ namespace FINANCEAPP.Services
         /// <summary>
         /// Añade una nueva operación a la base de datos
         /// </summary>
-        public async Task<Operation> AddAsync(Operation operation)
+        public async Task<Operation> AddAsync(Operation operation, string? bankAccountName = null, int? dividendPaymentId = null)
         {
             operation.CreatedAt = DateTime.Now;
             operation.CurrencyCode = await GetCompanyCurrencyAsync(operation.CompanyName);
             await ApplyExchangeRateAsync(operation);
-            _context.Operations.Add(operation);
-            await _context.SaveChangesAsync();
 
-            if (!string.IsNullOrWhiteSpace(operation.CompanyName))
+            // Movimiento bancario de una Compra o Dividendo (SPEC-02-06): cuenta y tipo de cambio se validan antes de tocar nada
+            BankAccount? account = null;
+            if (OperationAmountCalculator.GeneratesBankMovement(operation.Type))
             {
-                await _companyService.RecalculateTotalInvestedAsync(operation.CompanyName);
+                account = await _bankService.ResolveTradeAccountAsync(bankAccountName);
+                if (account != null)
+                {
+                    var baseCurrency = CurrencyFormatter.Normalize((await _countryService.GetBaseCurrencyAsync()).CurrencyCode);
+                    if (operation.EffectiveCurrencyCode != baseCurrency && !operation.ExchangeRate.HasValue)
+                    {
+                        throw new InvalidOperationException(OperationAmountCalculator.MissingTradeRateMessage(baseCurrency));
+                    }
+                }
             }
 
-            return operation;
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                _context.Operations.Add(operation);
+                await _context.SaveChangesAsync();
+
+                // Línea del calendario de dividendos cobrada con esta operación (SPEC-21-01, RF-6). Se relee aquí:
+                // si otra acción ya la cobró, se deshace todo y no hay dos operaciones del mismo dividendo
+                if (dividendPaymentId.HasValue)
+                {
+                    var line = await _context.DividendPayments.FirstOrDefaultAsync(d => d.Id == dividendPaymentId.Value);
+                    if (line == null || line.Status != DividendPaymentRules.StatusPending || line.OperationId.HasValue)
+                    {
+                        throw new InvalidOperationException("Este dividendo ya está cobrado o ya no existe.");
+                    }
+
+                    line.Status = DividendPaymentRules.StatusCollected;
+                    line.OperationId = operation.Id;
+                    line.UpdatedAt = DateTime.Now;
+                    await _context.SaveChangesAsync();
+                }
+
+                if (account != null)
+                {
+                    await _bankService.AddTradeMovementAsync(
+                        account.Name,
+                        OperationAmountCalculator.TradeMovementType(operation.Type),
+                        OperationAmountCalculator.CalculateTradeMovementAmount(new[] { operation }),
+                        operation.Date,
+                        OperationAmountCalculator.BuildTradeMovementDescription(operation.Type, operation.CompanyName, operation.NumberOfShares, operation.Id),
+                        operation.Id);
+                }
+
+                if (!string.IsNullOrWhiteSpace(operation.CompanyName))
+                {
+                    await _companyService.RecalculateTotalInvestedAsync(operation.CompanyName);
+                }
+
+                await transaction.CommitAsync();
+                return operation;
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Filas del lote de una compra o dividendo (SPEC-02-06): la fila original y las partidas por una venta
+        /// </summary>
+        private async Task<List<Operation>> GetTradeFamilyAsync(int key)
+        {
+            return await _context.Operations
+                .Where(o => o.Id == key || o.OriginOperationId == key)
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Crea el movimiento bancario de una Compra o Dividendo abierta que no lo tenía (SPEC-02-07, RF-4):
+        /// suma del lote convertida a la divisa base. Rechaza operaciones cerradas y divisas sin tipo de cambio.
+        /// Debe llamarse dentro de una transacción.
+        /// </summary>
+        private async Task CreateTradeMovementForFamilyAsync(Operation operation, int key, string accountName)
+        {
+            if (operation.CloseDate.HasValue)
+            {
+                throw new InvalidOperationException("Una operación cerrada no se puede registrar en el banco.");
+            }
+
+            var family = await GetTradeFamilyAsync(key);
+            var baseCurrency = CurrencyFormatter.Normalize((await _countryService.GetBaseCurrencyAsync()).CurrencyCode);
+            if (family.Any(o => o.EffectiveCurrencyCode != baseCurrency && !o.ExchangeRate.HasValue))
+            {
+                throw new InvalidOperationException(OperationAmountCalculator.MissingTradeRateMessage(baseCurrency));
+            }
+
+            await _bankService.AddTradeMovementAsync(
+                accountName,
+                OperationAmountCalculator.TradeMovementType(operation.Type),
+                OperationAmountCalculator.CalculateTradeMovementAmount(family),
+                family.Min(o => o.Date),
+                OperationAmountCalculator.BuildTradeMovementDescription(operation.Type, operation.CompanyName, family.Sum(o => o.NumberOfShares), key),
+                key);
+        }
+
+        /// <summary>
+        /// Recalcula el movimiento bancario de un lote con las filas que quedan (SPEC-02-06, RF-13): su suma convertida,
+        /// la fecha más antigua y el total de acciones. Sin filas, borra el movimiento. Debe llamarse dentro de una transacción.
+        /// </summary>
+        private async Task SyncTradeMovementAsync(int key, string operationType, string companyName)
+        {
+            var family = await GetTradeFamilyAsync(key);
+            if (family.Count == 0)
+            {
+                await _bankService.RemoveTradeMovementsAsync(new[] { key });
+                return;
+            }
+
+            var baseCurrency = CurrencyFormatter.Normalize((await _countryService.GetBaseCurrencyAsync()).CurrencyCode);
+            if (family.Any(o => o.EffectiveCurrencyCode != baseCurrency && !o.ExchangeRate.HasValue))
+            {
+                throw new InvalidOperationException(OperationAmountCalculator.MissingTradeRateMessage(baseCurrency));
+            }
+
+            await _bankService.UpdateTradeMovementAsync(
+                key,
+                OperationAmountCalculator.CalculateTradeMovementAmount(family),
+                family.Min(o => o.Date),
+                OperationAmountCalculator.BuildTradeMovementDescription(operationType, companyName, family.Sum(o => o.NumberOfShares), key));
         }
 
         /// <summary>
         /// Registra una Venta de acciones cerrando por FIFO las compras abiertas y guardando el histórico
         /// </summary>
-        public async Task<SaleRegistrationResult> RegisterSaleAsync(Operation sale, decimal sellPrice)
+        public async Task<SaleRegistrationResult> RegisterSaleAsync(Operation sale, decimal sellPrice, string? bankAccountName = null)
         {
             // 1. Validación
             if (!string.Equals(sale.Type, "Venta", StringComparison.Ordinal))
@@ -182,6 +308,12 @@ namespace FINANCEAPP.Services
                 return SaleRegistrationResult.Fail("El número de acciones de la venta debe ser mayor que 0.");
             }
 
+            // Acciones fraccionadas con hasta 2 decimales (SPEC-02-08)
+            if (!ShareQuantity.HasValidPrecision(sale.NumberOfShares))
+            {
+                return SaleRegistrationResult.Fail(ShareQuantity.PrecisionMessage);
+            }
+
             if (sale.PricePerShare <= 0)
             {
                 return SaleRegistrationResult.Fail("El precio por acción de la venta debe ser mayor que 0.");
@@ -196,6 +328,29 @@ namespace FINANCEAPP.Services
             if (company == null)
             {
                 return SaleRegistrationResult.Fail($"La empresa «{sale.CompanyName}» no existe.");
+            }
+
+            // Ingreso en el banco (SPEC-02-04): cuenta, tipo de cambio y liquidez se validan antes de tocar nada
+            BankAccount depositAccount;
+            try
+            {
+                depositAccount = await _bankService.ResolveSaleAccountAsync(bankAccountName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return SaleRegistrationResult.Fail(ex.Message);
+            }
+
+            var baseCurrency = CurrencyFormatter.Normalize((await _countryService.GetBaseCurrencyAsync()).CurrencyCode);
+            var saleCurrency = CurrencyFormatter.Normalize(await GetCompanyCurrencyAsync(sale.CompanyName));
+            if (saleCurrency != baseCurrency && (!sale.ExchangeRate.HasValue || sale.ExchangeRate.Value <= 0))
+            {
+                return SaleRegistrationResult.Fail(MissingRateMessage(baseCurrency));
+            }
+
+            if (OperationAmountCalculator.CalculateSaleNet(sellPrice, sale.NumberOfShares, sale.Commission, null) <= 0)
+            {
+                return SaleRegistrationResult.Fail(OperationAmountCalculator.SaleNetNotPositiveMessage);
             }
 
             // 2. Transacción (SQLite no admite transacciones anidadas: el recálculo se llama dentro de esta)
@@ -221,11 +376,12 @@ namespace FINANCEAPP.Services
                 {
                     await transaction.RollbackAsync();
                     return SaleRegistrationResult.Fail(
-                        $"No hay acciones suficientes: se venden {sale.NumberOfShares} y solo hay {Math.Max(availableShares, 0)} abiertas de «{sale.CompanyName}».");
+                        $"No hay acciones suficientes: se venden {ShareQuantity.Format(sale.NumberOfShares)} y solo hay {ShareQuantity.Format(Math.Max(availableShares, 0m))} abiertas de «{sale.CompanyName}».");
                 }
 
                 // 5. Consumir lotes hasta cubrir las acciones vendidas
-                var remaining = sale.NumberOfShares;
+                // Las cantidades se redondean a 2 decimales: SQLite puede devolverlas como reales (SPEC-02-08)
+                var remaining = ShareQuantity.Round(sale.NumberOfShares);
                 decimal totalCost = 0m;
                 decimal closedCommissions = 0m;
                 var pendingParts = new List<Operation>();
@@ -243,7 +399,7 @@ namespace FINANCEAPP.Services
                         // Lote completo
                         totalCost += lot.PricePerShare * lot.NumberOfShares;
                         closedCommissions += lot.Commission;
-                        remaining -= lot.NumberOfShares;
+                        remaining = ShareQuantity.Round(remaining - lot.NumberOfShares);
                         lot.CloseDate = sale.Date;
                         closedLots.Add(lot);
                     }
@@ -252,8 +408,8 @@ namespace FINANCEAPP.Services
                         // Lote parcial: se divide en una fila cerrada y otra abierta duplicada.
                         // La parte pendiente se queda con el resto para no perder céntimos.
                         var closedShares = remaining;
-                        var pendingShares = lot.NumberOfShares - closedShares;
-                        var ratio = (decimal)closedShares / lot.NumberOfShares;
+                        var pendingShares = ShareQuantity.Round(lot.NumberOfShares - closedShares);
+                        var ratio = closedShares / lot.NumberOfShares;
 
                         var closedCommission = Math.Round(lot.Commission * ratio, 2);
                         var closedAmount = Math.Round(lot.Amount * ratio, 2);
@@ -337,11 +493,145 @@ namespace FINANCEAPP.Services
                 }
                 await _context.SaveChangesAsync();
 
+                // La liquidez de la venta entra en la cuenta bancaria (en divisa base, con el tipo ya normalizado)
+                var deposit = OperationAmountCalculator.CalculateSaleNet(roundedSellPrice, sale.NumberOfShares, sale.Commission, sale.ExchangeRate);
+                await _bankService.AddSaleDepositAsync(
+                    depositAccount.Name,
+                    deposit,
+                    sale.Date,
+                    OperationAmountCalculator.BuildSaleDepositDescription(record, sale.CurrencyCode),
+                    record.Id);
+
                 // 9. Recalcular la empresa dentro de la transacción y confirmar
                 await _companyService.RecalculateTotalInvestedAsync(sale.CompanyName);
                 await transaction.CommitAsync();
 
                 return new SaleRegistrationResult { Success = true, SaleHistoryId = record.Id };
+            }
+            catch (InvalidOperationException ex)
+            {
+                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
+                return SaleRegistrationResult.Fail(ex.Message);
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Divisa de la venta, divisa base y operación Venta de un registro del histórico (SPEC-02-04)
+        /// </summary>
+        private async Task<(string Currency, string BaseCurrency, Operation? Sale)> GetSaleDepositContextAsync(SaleHistory record)
+        {
+            var saleOperation = await _context.Operations
+                .FirstOrDefaultAsync(o => o.Id == record.OperationId && o.Type == "Venta");
+            var baseCurrency = CurrencyFormatter.Normalize((await _countryService.GetBaseCurrencyAsync()).CurrencyCode);
+            var currency = saleOperation != null
+                ? saleOperation.EffectiveCurrencyCode
+                : CurrencyFormatter.Normalize(await GetCompanyCurrencyAsync(record.CompanyName));
+            return (currency, baseCurrency, saleOperation);
+        }
+
+        public async Task<SaleDepositInfo?> GetSaleDepositInfoAsync(int saleHistoryId)
+        {
+            var record = await _context.SalesHistory.AsNoTracking().FirstOrDefaultAsync(s => s.Id == saleHistoryId);
+            if (record == null)
+            {
+                return null;
+            }
+
+            var (currency, baseCurrency, sale) = await GetSaleDepositContextAsync(record);
+            return new SaleDepositInfo
+            {
+                CurrencyCode = currency,
+                BaseCurrencyCode = baseCurrency,
+                RequiresExchangeRate = currency != baseCurrency && !(sale?.ExchangeRate > 0)
+            };
+        }
+
+        public async Task<SaleRegistrationResult> DepositExistingSaleAsync(int saleHistoryId, string? bankAccountName, decimal? exchangeRate)
+        {
+            var record = await _context.SalesHistory.FirstOrDefaultAsync(s => s.Id == saleHistoryId);
+            if (record == null)
+            {
+                return SaleRegistrationResult.Fail("El registro ya no existe.");
+            }
+
+            // Una venta solo se ingresa una vez
+            var existing = await _bankService.GetSaleDepositsAsync(new[] { saleHistoryId });
+            if (existing.TryGetValue(saleHistoryId, out var depositedIn))
+            {
+                return SaleRegistrationResult.Fail($"Esta venta ya está ingresada en {depositedIn.Trim()}.");
+            }
+
+            BankAccount account;
+            try
+            {
+                account = await _bankService.ResolveSaleAccountAsync(bankAccountName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return SaleRegistrationResult.Fail(ex.Message);
+            }
+
+            var (currency, baseCurrency, sale) = await GetSaleDepositContextAsync(record);
+
+            // Tipo de cambio: el guardado en la Venta o, si no tiene, el indicado por el usuario
+            decimal? rate = null;
+            var saveRateInSale = false;
+            if (currency != baseCurrency)
+            {
+                if (sale?.ExchangeRate > 0)
+                {
+                    rate = sale.ExchangeRate;
+                }
+                else if (exchangeRate > 0)
+                {
+                    rate = Math.Round(exchangeRate.Value, 6);
+                    saveRateInSale = sale != null;
+                }
+                else
+                {
+                    return SaleRegistrationResult.Fail(MissingRateMessage(baseCurrency));
+                }
+            }
+
+            var commission = sale?.Commission ?? 0m;
+            if (OperationAmountCalculator.CalculateSaleNet(record.SellPrice, record.NumberOfShares, commission, null) <= 0)
+            {
+                return SaleRegistrationResult.Fail(OperationAmountCalculator.SaleNetNotPositiveMessage);
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                if (saveRateInSale)
+                {
+                    sale!.ExchangeRate = rate;
+                    await ApplyExchangeRateAsync(sale);
+                    await _context.SaveChangesAsync();
+                }
+
+                var deposit = OperationAmountCalculator.CalculateSaleNet(record.SellPrice, record.NumberOfShares, commission, rate);
+                await _bankService.AddSaleDepositAsync(
+                    account.Name,
+                    deposit,
+                    record.SaleDate,
+                    OperationAmountCalculator.BuildSaleDepositDescription(record, currency),
+                    record.Id);
+
+                await transaction.CommitAsync();
+                return new SaleRegistrationResult { Success = true, SaleHistoryId = record.Id };
+            }
+            catch (InvalidOperationException ex)
+            {
+                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
+                return SaleRegistrationResult.Fail(ex.Message);
             }
             catch
             {
@@ -411,7 +701,7 @@ namespace FINANCEAPP.Services
                         foreach (var other in ordered.Skip(1))
                         {
                             // Importe y comisión ya redondeados: la suma devuelve exactamente los del original
-                            survivor.NumberOfShares += other.NumberOfShares;
+                            survivor.NumberOfShares = ShareQuantity.Round(survivor.NumberOfShares + other.NumberOfShares);
                             survivor.Amount += other.Amount;
                             survivor.Commission += other.Commission;
                             _context.Operations.Remove(other);
@@ -441,6 +731,9 @@ namespace FINANCEAPP.Services
                         await _companyService.RecalculateTotalInvestedAsync(company);
                     }
                 }
+
+                // El ingreso bancario de la venta desaparece con ella (SPEC-02-04)
+                await _bankService.RemoveSaleDepositsAsync(saleHistoryId);
 
                 await transaction.CommitAsync();
 
@@ -530,7 +823,7 @@ namespace FINANCEAPP.Services
             }
 
             return operation.Type == "Venta"
-                ? $"Esta venta está en el histórico (nº {recordId.Value}). Si cambias acciones o precio, el beneficio guardado no cambia; si la reabres, volverá a restar acciones como una venta antigua."
+                ? $"Esta venta está en el histórico (nº {recordId.Value}). Si cambias acciones o precio, no cambian el beneficio guardado ni el ingreso en la cuenta bancaria (el precio se cambia desde «Histórico de ventas»); si la reabres, volverá a restar acciones como una venta antigua."
                 : $"Esta operación la cerró la venta nº {recordId.Value} del histórico. El beneficio guardado de esa venta no cambia; si la reabres, se desvincula de la venta y ya no se reabrirá al deshacerla.";
         }
 
@@ -591,15 +884,38 @@ namespace FINANCEAPP.Services
         /// <summary>
         /// Actualiza una operación existente
         /// </summary>
-        public async Task<bool> UpdateAsync(Operation operation)
+        public async Task<bool> UpdateAsync(Operation operation, string? bankAccountName = null)
         {
             // Las operaciones ligadas a una venta del histórico se pueden editar (con aviso en pantalla)
+            await using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
                 var existing = await _context.Operations.FindAsync(operation.Id);
                 if (existing == null)
                 {
+                    await transaction.RollbackAsync();
                     return false;
+                }
+
+                // Movimiento bancario de una Compra o Dividendo (SPEC-02-06): clave del lote antes de editar
+                var movementKey = OperationAmountCalculator.GetTradeMovementKey(existing);
+                var previousType = existing.Type;
+                string? currentAccount = null;
+                if (OperationAmountCalculator.GeneratesBankMovement(existing.Type))
+                {
+                    (await _bankService.GetTradeMovementAccountsAsync(new[] { movementKey })).TryGetValue(movementKey, out currentAccount);
+                }
+
+                var hasMovement = currentAccount != null;
+                if (hasMovement && !string.Equals(previousType, operation.Type, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Esta operación tiene un movimiento bancario: bórrala y créala de nuevo.");
+                }
+
+                // Una operación con movimiento no puede quedarse sin él (SPEC-02-07, RF-5): solo cambiar de cuenta
+                if (hasMovement && bankAccountName == OperationAmountCalculator.NoBankMovementValue)
+                {
+                    throw new InvalidOperationException("Esta operación tiene un movimiento bancario: elige otra cuenta o bórrala.");
                 }
 
                 var previousCompanyName = existing.CompanyName;
@@ -643,14 +959,51 @@ namespace FINANCEAPP.Services
                     await _companyService.RecalculateTotalInvestedAsync(operation.CompanyName);
                 }
 
+                // El movimiento bancario sigue a la operación (SPEC-02-06): suma del lote, fecha más antigua y acciones
+                if (hasMovement)
+                {
+                    await SyncTradeMovementAsync(movementKey, existing.Type, existing.CompanyName);
+                }
+
+                // Cuenta elegida al editar (SPEC-02-07): pasar el movimiento a otra cuenta o crearlo en una operación abierta sin él
+                if (OperationAmountCalculator.GeneratesBankMovement(existing.Type)
+                    && !string.IsNullOrWhiteSpace(bankAccountName)
+                    && bankAccountName != OperationAmountCalculator.NoBankMovementValue)
+                {
+                    var account = await _bankService.ResolveTradeAccountAsync(bankAccountName);
+                    if (account != null)
+                    {
+                        if (hasMovement)
+                        {
+                            if (!string.Equals(account.Name, currentAccount, StringComparison.Ordinal))
+                            {
+                                await _bankService.MoveTradeMovementAsync(movementKey, account.Name);
+                            }
+                        }
+                        else
+                        {
+                            await CreateTradeMovementForFamilyAsync(existing, movementKey, account.Name);
+                        }
+                    }
+                }
+
+                await transaction.CommitAsync();
                 return true;
             }
             catch (DbUpdateConcurrencyException)
             {
+                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
                 if (!await _context.Operations.AnyAsync(o => o.Id == operation.Id))
                 {
                     return false;
                 }
+                throw;
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
                 throw;
             }
         }
@@ -673,15 +1026,49 @@ namespace FINANCEAPP.Services
             }
 
             var companyName = operation.CompanyName;
-            _context.Operations.Remove(operation);
-            await _context.SaveChangesAsync();
+            var operationType = operation.Type;
+            var movementKey = OperationAmountCalculator.GetTradeMovementKey(operation);
+            var hasMovement = OperationAmountCalculator.GeneratesBankMovement(operationType)
+                && (await _bankService.GetTradeMovementAccountsAsync(new[] { movementKey })).ContainsKey(movementKey);
 
-            if (!string.IsNullOrWhiteSpace(companyName))
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
             {
-                await _companyService.RecalculateTotalInvestedAsync(companyName);
-            }
+                _context.Operations.Remove(operation);
 
-            return true;
+                // La línea de dividendo que generó esta operación vuelve a Pendiente (SPEC-21-01, RF-7)
+                var dividendLines = await _context.DividendPayments
+                    .Where(d => d.OperationId == id)
+                    .ToListAsync();
+                foreach (var line in dividendLines)
+                {
+                    line.Status = DividendPaymentRules.StatusPending;
+                    line.OperationId = null;
+                    line.UpdatedAt = DateTime.Now;
+                }
+
+                await _context.SaveChangesAsync();
+
+                if (!string.IsNullOrWhiteSpace(companyName))
+                {
+                    await _companyService.RecalculateTotalInvestedAsync(companyName);
+                }
+
+                // El movimiento bancario baja con la operación; en un lote partido queda con las filas restantes (SPEC-02-06, RF-13)
+                if (hasMovement)
+                {
+                    await SyncTradeMovementAsync(movementKey, operationType, companyName);
+                }
+
+                await transaction.CommitAsync();
+                return true;
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
+                throw;
+            }
         }
 
         /// <summary>
@@ -689,7 +1076,7 @@ namespace FINANCEAPP.Services
         /// lotes de Compra y Traspaso menos las Ventas antiguas que siguen abiertas. Sin redondear a 0.
         /// Es la misma cuenta que usa <see cref="RegisterSaleAsync"/>.
         /// </summary>
-        private static int ComputeAvailableShares(IEnumerable<Operation> openOperations)
+        private static decimal ComputeAvailableShares(IEnumerable<Operation> openOperations)
         {
             var list = openOperations.ToList();
             var lotShares = list
@@ -698,20 +1085,20 @@ namespace FINANCEAPP.Services
             var legacyOpenSoldShares = list
                 .Where(o => o.Type == "Venta")
                 .Sum(o => o.NumberOfShares);
-            return lotShares - legacyOpenSoldShares;
+            return ShareQuantity.Round(lotShares - legacyOpenSoldShares);
         }
 
         /// <summary>
         /// Devuelve las acciones disponibles para vender de una empresa (mínimo 0)
         /// </summary>
-        public async Task<int> GetAvailableSharesAsync(string companyName)
+        public async Task<decimal> GetAvailableSharesAsync(string companyName)
         {
             var openOperations = await _context.Operations
                 .AsNoTracking()
                 .Where(o => o.CompanyName == companyName && o.CloseDate == null)
                 .ToListAsync();
 
-            return Math.Max(ComputeAvailableShares(openOperations), 0);
+            return Math.Max(ComputeAvailableShares(openOperations), 0m);
         }
 
         /// <summary>
@@ -719,7 +1106,7 @@ namespace FINANCEAPP.Services
         /// (SPEC-05-01, RF-6). Con fecha de hoy y mercado Cerrado se bloquea; con fecha anterior no se exige
         /// mercado abierto; con mercado Desconocido se permite.
         /// </summary>
-        public string? GetQuickTradeBlockReason(string type, DateTime date, MarketState marketState, int availableShares)
+        public string? GetQuickTradeBlockReason(string type, DateTime date, MarketState marketState, decimal availableShares, bool hasBankAccounts)
         {
             var today = DateTime.Today;
 
@@ -736,6 +1123,11 @@ namespace FINANCEAPP.Services
             if (type == "Venta" && availableShares <= 0)
             {
                 return "No tienes acciones de esta empresa.";
+            }
+
+            if (type == "Venta" && !hasBankAccounts)
+            {
+                return BankService.NoBankAccountsMessage;
             }
 
             return null;
@@ -762,7 +1154,8 @@ namespace FINANCEAPP.Services
             }
 
             var availableShares = await GetAvailableSharesAsync(company.Name);
-            var blockReason = GetQuickTradeBlockReason(request.Type, request.Date, request.MarketState, availableShares);
+            var hasBankAccounts = await _bankService.GetDefaultBankAccountAsync() != null;
+            var blockReason = GetQuickTradeBlockReason(request.Type, request.Date, request.MarketState, availableShares, hasBankAccounts);
             if (blockReason != null)
             {
                 return QuickTradeResult.Fail(blockReason);
@@ -807,11 +1200,19 @@ namespace FINANCEAPP.Services
 
             if (request.Type == "Compra")
             {
-                await AddAsync(operation);
+                try
+                {
+                    await AddAsync(operation, request.BankAccountName);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return QuickTradeResult.Fail(ex.Message);
+                }
+
                 return new QuickTradeResult { Success = true, Operation = operation };
             }
 
-            var saleResult = await RegisterSaleAsync(operation, operation.PricePerShare);
+            var saleResult = await RegisterSaleAsync(operation, operation.PricePerShare, request.BankAccountName);
             return saleResult.Success
                 ? new QuickTradeResult { Success = true, Operation = operation }
                 : QuickTradeResult.Fail(saleResult.ErrorMessage);

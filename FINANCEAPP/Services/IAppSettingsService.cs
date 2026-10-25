@@ -86,6 +86,9 @@ namespace FINANCEAPP.Services
 
         /// <summary>Barras de volumen bajo el gráfico</summary>
         public bool ShowVolume { get; set; }
+
+        /// <summary>Marcas temporales del usuario (SPEC-05-03); activada por defecto</summary>
+        public bool ShowMarks { get; set; } = true;
     }
 
     /// <summary>

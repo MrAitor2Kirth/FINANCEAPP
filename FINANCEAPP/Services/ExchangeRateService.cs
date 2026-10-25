@@ -203,6 +203,7 @@ namespace FINANCEAPP.Services
                 }
 
                 initial += company.TotalInvestedInitial * factor;
+                totals.InitialByCompanyId[company.Id] = company.TotalInvestedInitial * factor;
                 value += company.TotalInvestedValue * factor;
                 dividends += company.TotalDividends * factor;
                 totals.Included.Add(company);
@@ -217,37 +218,127 @@ namespace FINANCEAPP.Services
         public async Task<ConvertedSaleTotals> GetConvertedSaleTotalsAsync(IEnumerable<SaleHistory> sales, IReadOnlyDictionary<string, string> currencyByCompany)
         {
             var baseCurrency = await GetBaseCurrencyCodeAsync();
-            var rates = await _context.ExchangeRates
+            var currentRates = await _context.ExchangeRates
                 .AsNoTracking()
                 .Where(r => r.BaseCurrencyCode == baseCurrency)
                 .ToDictionaryAsync(r => r.CurrencyCode, r => r.Rate);
 
+            var salesList = sales.ToList();
+
+            // SPEC-02-05 (RF-10): cada venta y cada compra cerrada se convierten con su tipo guardado.
+            // Solo hacen falta las operaciones de las ventas en otra divisa.
+            var foreignSales = salesList
+                .Where(s => CurrencyOf(s, currencyByCompany) != baseCurrency)
+                .ToList();
+            var saleIds = foreignSales.Select(s => s.Id).ToList();
+            var operationIds = foreignSales.Select(s => s.OperationId).ToList();
+
+            var saleOperations = saleIds.Count == 0
+                ? new Dictionary<int, Operation>()
+                : (await _context.Operations
+                    .AsNoTracking()
+                    .Where(o => operationIds.Contains(o.Id))
+                    .ToListAsync())
+                    .ToDictionary(o => o.Id);
+            var closedLots = saleIds.Count == 0
+                ? new Dictionary<int, List<Operation>>()
+                : (await _context.Operations
+                    .AsNoTracking()
+                    .Where(o => o.SaleHistoryId != null && saleIds.Contains(o.SaleHistoryId.Value))
+                    .ToListAsync())
+                    .GroupBy(o => o.SaleHistoryId!.Value)
+                    .ToDictionary(g => g.Key, g => g.ToList());
+
             var totals = new ConvertedSaleTotals { BaseCurrencyCode = baseCurrency };
             decimal amount = 0, commission = 0, profit = 0;
 
-            foreach (var sale in sales)
+            foreach (var sale in salesList)
             {
-                var currency = CurrencyFormatter.Normalize(
-                    currencyByCompany.TryGetValue(sale.CompanyName, out var code) ? code : null);
-                decimal factor;
+                var currency = CurrencyOf(sale, currencyByCompany);
                 if (currency == baseCurrency)
                 {
-                    factor = 1m;
+                    amount += sale.Amount;
+                    commission += sale.Commission;
+                    profit += sale.Profit;
+                    continue;
                 }
-                else if (rates.TryGetValue(currency, out var rate) && rate > 0)
+
+                var approximate = false;
+
+                // Tipo de la Venta: el guardado en la operación; si no vale, el actual
+                saleOperations.TryGetValue(sale.OperationId, out var saleOperation);
+                var saleRate = StoredRate(saleOperation, baseCurrency);
+                if (saleRate == null)
                 {
-                    factor = rate;
-                    totals.ConvertedSales++;
+                    saleRate = CurrentRate(currentRates, currency);
+                    approximate = true;
                 }
-                else
+                if (saleRate == null)
                 {
                     totals.MissingRateSales++;
                     continue;
                 }
 
-                amount += sale.Amount * factor;
-                commission += sale.Commission * factor;
-                profit += sale.Profit * factor;
+                // Coste y comisiones de las compras cerradas, cada una con su tipo
+                decimal cost = 0, buyCommission = 0;
+                var missingBuyRate = false;
+                if (closedLots.TryGetValue(sale.Id, out var lots) && lots.Count > 0)
+                {
+                    foreach (var lot in lots)
+                    {
+                        var buyRate = StoredRate(lot, baseCurrency);
+                        if (buyRate == null)
+                        {
+                            buyRate = CurrentRate(currentRates, currency);
+                            approximate = true;
+                        }
+                        if (buyRate == null)
+                        {
+                            missingBuyRate = true;
+                            break;
+                        }
+
+                        cost += lot.PricePerShare * lot.NumberOfShares * buyRate.Value;
+                        buyCommission += lot.Commission * buyRate.Value;
+                    }
+                }
+                else
+                {
+                    // Venta anterior a SPEC-02-03: sin compras enlazadas se usa el coste medio con el tipo actual
+                    var currentRate = CurrentRate(currentRates, currency);
+                    if (currentRate == null)
+                    {
+                        missingBuyRate = true;
+                    }
+                    else
+                    {
+                        cost = sale.AverageBuyPrice * sale.NumberOfShares * currentRate.Value;
+                        buyCommission = Math.Max(sale.Commission - (saleOperation?.Commission ?? 0m), 0m) * currentRate.Value;
+                        approximate = true;
+                    }
+                }
+
+                if (missingBuyRate)
+                {
+                    totals.MissingRateSales++;
+                    continue;
+                }
+
+                var saleAmount = sale.Amount * saleRate.Value;
+                var saleCommissionTotal = (saleOperation?.Commission ?? sale.Commission) * saleRate.Value + buyCommission;
+
+                amount += saleAmount;
+                commission += saleCommissionTotal;
+                profit += saleAmount - cost - saleCommissionTotal;
+
+                if (approximate)
+                {
+                    totals.ApproximateSales++;
+                }
+                else
+                {
+                    totals.ConvertedSales++;
+                }
             }
 
             totals.Amount = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
@@ -255,6 +346,19 @@ namespace FINANCEAPP.Services
             totals.Profit = Math.Round(profit, 2, MidpointRounding.AwayFromZero);
             return totals;
         }
+
+        private static string CurrencyOf(SaleHistory sale, IReadOnlyDictionary<string, string> currencyByCompany) =>
+            CurrencyFormatter.Normalize(currencyByCompany.TryGetValue(sale.CompanyName, out var code) ? code : null);
+
+        /// <summary>Tipo guardado en la operación; solo vale si es mayor que 0 y su destino es la divisa base actual</summary>
+        private static decimal? StoredRate(Operation? operation, string baseCurrency) =>
+            operation?.ExchangeRate is > 0
+                && string.Equals(operation.ExchangeRateTo, baseCurrency, StringComparison.OrdinalIgnoreCase)
+                ? operation.ExchangeRate
+                : null;
+
+        private static decimal? CurrentRate(IReadOnlyDictionary<string, decimal> rates, string currency) =>
+            rates.TryGetValue(currency, out var rate) && rate > 0 ? rate : null;
 
         private static string RateText(string from, string to, decimal rate) =>
             $"1 {from} = {rate.ToString("0.######", CultureInfo.CurrentCulture)} {to}";

@@ -16,8 +16,8 @@ namespace FINANCEAPP.Services
         /// <summary>Fecha de la operación (no futura)</summary>
         public DateTime Date { get; set; }
 
-        /// <summary>Número de acciones (entero mayor o igual que 1)</summary>
-        public int NumberOfShares { get; set; }
+        /// <summary>Número de acciones, mayor que 0 y con hasta 2 decimales (SPEC-02-08)</summary>
+        public decimal NumberOfShares { get; set; }
 
         /// <summary>Precio por acción (mayor que 0)</summary>
         public decimal PricePerShare { get; set; }
@@ -30,6 +30,9 @@ namespace FINANCEAPP.Services
 
         /// <summary>Estado del mercado en el momento de confirmar</summary>
         public MarketState MarketState { get; set; } = MarketState.Unknown;
+
+        /// <summary>Cuenta bancaria del movimiento de la operación (SPEC-02-04 en Venta, SPEC-02-06 en Compra); vacía = la más antigua; <c>OperationAmountCalculator.NoBankMovementValue</c> = sin movimiento (solo Compra)</summary>
+        public string? BankAccountName { get; set; }
     }
 
     /// <summary>
@@ -72,11 +75,14 @@ namespace FINANCEAPP.Services
         /// <summary>Fecha de la operación</summary>
         public DateTime Date { get; set; }
 
+        /// <summary>Fecha real de la operación cuando <see cref="Date"/> se ha movido a su periodo del gráfico (SPEC-05-03)</summary>
+        public DateTime? OperationDate { get; set; }
+
         /// <summary>Precio por acción; null en dividendos (el gráfico lo sitúa sobre la cotización)</summary>
         public decimal? Price { get; set; }
 
         /// <summary>Número de acciones (suma de las filas de un lote partido)</summary>
-        public int Shares { get; set; }
+        public decimal Shares { get; set; }
 
         /// <summary>Importe de la operación (suma de las filas de un lote partido)</summary>
         public decimal Amount { get; set; }

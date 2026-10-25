@@ -1,0 +1,755 @@
+@page "/dividends"
+@inject IDividendService DividendService
+@inject ICompanyService CompanyService
+@inject IBankService BankService
+@inject ICountryService CountryService
+@inject IExchangeRateService ExchangeRateService
+
+<PageTitle>Dividendos</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div>
+                    <h1 class="sw" style="--swatch:var(--indigo)">
+                        <i class="bi bi-calendar-check me-2"></i>
+                        Dividendos
+                    </h1>
+                    <p class="lead text-muted">Calendario de dividendos de tus empresas: próximos pagos y cobrados</p>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="/companies" class="btn btn-outline-secondary btn-lg">
+                        <i class="bi bi-arrow-left me-2"></i>
+                        Volver a empresas
+                    </a>
+                    <button type="button" class="btn btn-outline-primary btn-lg" @onclick="ToggleProposals" disabled="@isBusy">
+                        <i class="bi bi-lightbulb me-2"></i>
+                        Propuestas (@proposals.Count(p => !p.AlreadyExists))
+                    </button>
+                    <button type="button" class="btn btn-primary btn-lg" @onclick="OpenNewForm" disabled="@isBusy">
+                        <i class="bi bi-plus-circle me-2"></i>
+                        Nuevo dividendo
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger d-flex align-items-center justify-content-between" role="alert">
+            <div><i class="bi bi-exclamation-triangle-fill me-2"></i>@errorMessage</div>
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => errorMessage = null"></button>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success d-flex align-items-center justify-content-between" role="alert">
+            <div><i class="bi bi-check-circle-fill me-2"></i>@successMessage</div>
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => successMessage = null"></button>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <p class="mt-3 text-muted">Cargando dividendos...</p>
+        </div>
+    }
+    else
+    {
+        @* ---------- Resumen en divisa base (RF-2) ---------- *@
+        <div class="stat-grid mb-4">
+            <div class="stat-card" style="--swatch:var(--indigo)">
+                <p class="stat-label">Pendiente 90 días</p>
+                <p class="stat-value">@CurrencyFormatter.Format(summary.PendingNext90Days, summary.BaseCurrencyCode)</p>
+            </div>
+            <div class="stat-card" style="--swatch:var(--gain)">
+                <p class="stat-label">Cobrado este año</p>
+                <p class="stat-value">@CurrencyFormatter.Format(summary.CollectedThisYear, summary.BaseCurrencyCode)</p>
+            </div>
+        </div>
+        @if (summary.MissingRateCompanies > 0)
+        {
+            <p class="small text-muted mt-n3 mb-3">
+                <i class="bi bi-info-circle me-1"></i>
+                @summary.MissingRateCompanies empresa(s) en otra divisa sin tipo de cambio no entran en los totales. Puedes añadirlo en Configuración.
+            </p>
+        }
+
+        @* ---------- Propuestas de dividendos anunciados (RF-11) ---------- *@
+        @if (showProposals)
+        {
+            <div class="card shadow-sm mb-4">
+                <div class="card-body">
+                    <h2 class="h5 mb-1">Propuestas de dividendos anunciados</h2>
+                    <p class="small text-muted">
+                        Dividendos ya anunciados por tus empresas. Marca los que quieras y se crearán como líneas pendientes;
+                        nunca se crean operaciones (eso lo haces tú con «Generar operación»).
+                    </p>
+                    @if (proposals.Count == 0)
+                    {
+                        <p class="text-muted mb-0">No hay propuestas para tus empresas.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-2">
+                                <thead>
+                                    <tr>
+                                        <th></th>
+                                        <th>Empresa</th>
+                                        <th>Ex-dividendo</th>
+                                        <th>Pago</th>
+                                        <th class="text-end">Importe por acción</th>
+                                        <th class="text-end">%</th>
+                                        <th>Fuente</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var proposal in proposals)
+                                    {
+                                        <tr class="@(proposal.AlreadyExists ? "text-muted" : "")">
+                                            <td>
+                                                @if (proposal.AlreadyExists)
+                                                {
+                                                    <span class="badge text-bg-light">Ya existe</span>
+                                                }
+                                                else
+                                                {
+                                                    <input type="checkbox" class="form-check-input" checked="@proposal.Selected"
+                                                           @onchange="e => proposal.Selected = (bool)e.Value!" />
+                                                }
+                                            </td>
+                                            <td>@proposal.CompanyName</td>
+                                            <td>@(proposal.Proposal.ExDividendDate?.ToString("dd/MM/yyyy") ?? "—")</td>
+                                            <td>@proposal.Proposal.PaymentDate.ToString("dd/MM/yyyy")</td>
+                                            <td class="text-end">@(proposal.Proposal.AmountPerShare.HasValue ? FormatPerShare(proposal.Proposal.AmountPerShare.Value, proposal.CurrencyCode) : "—")</td>
+                                            <td class="text-end">@(proposal.Proposal.DividendPercent.HasValue ? $"{proposal.Proposal.DividendPercent.Value:N2} %" : "—")</td>
+                                            <td class="small">@proposal.Proposal.Source</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="d-flex justify-content-end gap-2">
+                            <button type="button" class="btn btn-outline-secondary" @onclick="ToggleProposals">Cerrar</button>
+                            <button type="button" class="btn btn-primary" @onclick="CreateSelectedProposalsAsync"
+                                    disabled="@(isBusy || !proposals.Any(p => p.Selected && !p.AlreadyExists))">
+                                Crear seleccionadas
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @* ---------- Formulario de alta y edición (RF-3 y RF-4); edita una copia ---------- *@
+        @if (formOpen)
+        {
+            <div class="card shadow-sm mb-4 dividend-form">
+                <div class="card-body">
+                    <h2 class="h5 mb-3">@(editingId.HasValue ? "Editar dividendo" : "Nuevo dividendo")</h2>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Empresa</label>
+                            <select class="form-select" value="@input.CompanyId" @onchange="OnCompanyChangedAsync">
+                                <option value="0">Elige la empresa…</option>
+                                @foreach (var company in companies)
+                                {
+                                    <option value="@company.Id">@company.Name@(company.NumberOfShares > 0 ? $" ({ShareQuantity.Format(company.NumberOfShares)} acc.)" : "")</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label">Fecha de pago</label>
+                            <input type="date" class="form-control" @bind="input.PaymentDate" />
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label">Ex-dividendo</label>
+                            <input type="date" class="form-control" @bind="input.ExDividendDate" />
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label">Importe por acción</label>
+                            <div class="input-group">
+                                <input type="number" min="0" step="0.0001" class="form-control" placeholder="Sin importe"
+                                       @bind="input.AmountPerShare" />
+                                <span class="input-group-text">@CurrencyFormatter.Symbol(FormCurrency)</span>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label">Acciones</label>
+                            <input type="number" min="0" step="0.01" inputmode="decimal" class="form-control" @bind="input.NumberOfShares" />
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label">% dividendo</label>
+                            <div class="input-group">
+                                <input type="number" min="0" max="100" step="0.01" class="form-control" placeholder="En blanco"
+                                       @bind="input.DividendPercent" />
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Notas</label>
+                            <input type="text" class="form-control" maxlength="200" placeholder="p. ej. fuente de la fecha"
+                                   @bind="input.Notes" />
+                        </div>
+                        <div class="col-md-4 d-flex flex-column justify-content-end">
+                            @* Referencia del último pago según Yahoo (RF-12): no crea líneas ni rellena fechas *@
+                            <button type="button" class="btn btn-outline-secondary" @onclick="LoadLastDividendAsync"
+                                    disabled="@(input.CompanyId <= 0 || isLoadingLastDividend)">
+                                @if (isLoadingLastDividend)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                }
+                                <i class="bi bi-cloud-download me-1"></i>Último dividendo (Yahoo)
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (lastDividend != null)
+                    {
+                        <div class="small mt-2">
+                            @if (lastDividend.Dividend != null)
+                            {
+                                <span>Último pago según Yahoo: <strong>@lastDividend.Dividend.Date.ToString("dd/MM/yyyy")</strong>,
+                                    <strong>@FormatPerShare(lastDividend.Dividend.Amount, FormCurrency)</strong> por acción.</span>
+                                <button type="button" class="btn btn-link btn-sm p-0 ms-2" @onclick="UseLastDividendAmount">Usar importe</button>
+                            }
+                            else
+                            {
+                                <span class="text-muted"><i class="bi bi-info-circle me-1"></i>@lastDividend.Message</span>
+                            }
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(formError))
+                    {
+                        <div class="alert alert-danger py-2 mt-3 mb-0">@formError</div>
+                    }
+
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button type="button" class="btn btn-outline-secondary" @onclick="CloseForm" disabled="@isBusy">Cancelar</button>
+                        <button type="button" class="btn btn-primary" @onclick="SaveFormAsync" disabled="@isBusy">
+                            @if (isBusy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            Guardar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @* ---------- Generar la operación de Dividendo (RF-6) ---------- *@
+        @if (generateLine != null)
+        {
+            <div class="card shadow-sm mb-4 dividend-form generate">
+                <div class="card-body">
+                    <h2 class="h5 mb-1">Generar operación de dividendo</h2>
+                    <p class="small text-muted">
+                        @generateLine.CompanyName · pago del @generateLine.PaymentDate.ToString("dd/MM/yyyy") ·
+                        @ShareQuantity.Format(generateLine.NumberOfShares) acciones × @FormatPerShare(generateLine.AmountPerShare ?? 0m, generateLine.CurrencyCode)
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Fecha</label>
+                            <input type="text" class="form-control" value="@generateLine.PaymentDate.ToString("dd/MM/yyyy")" disabled />
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Importe (editable)</label>
+                            <div class="input-group">
+                                <input type="number" min="0.01" step="0.01" class="form-control" @bind="generateAmount" />
+                                <span class="input-group-text">@CurrencyFormatter.Symbol(generateLine.CurrencyCode)</span>
+                            </div>
+                            <div class="form-text">Propuesto: acciones × importe por acción. Puedes escribir el neto.</div>
+                        </div>
+                        @if (bankAccounts.Count > 0)
+                        {
+                            <div class="col-md-3">
+                                <label class="form-label">Cuenta bancaria</label>
+                                <select class="form-select" @bind="generateBankAccount">
+                                    <option value="">Por defecto: @defaultBankAccountName</option>
+                                    <option value="@OperationAmountCalculator.NoBankMovementValue">No registrar en banco</option>
+                                    @foreach (var account in bankAccounts)
+                                    {
+                                        <option value="@account.Name">@account.Name</option>
+                                    }
+                                </select>
+                            </div>
+                        }
+                        @if (!IsBaseCurrency(generateLine.CurrencyCode))
+                        {
+                            <div class="col-6 col-md-3">
+                                <label class="form-label">Tipo a @baseCurrencyCode</label>
+                                <input type="number" min="0" step="0.000001" class="form-control" placeholder="Sin tipo"
+                                       @bind="generateExchangeRate" />
+                            </div>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(generateError))
+                    {
+                        <div class="alert alert-danger py-2 mt-3 mb-0">@generateError</div>
+                    }
+
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button type="button" class="btn btn-outline-secondary" @onclick="CloseGenerate" disabled="@isBusy">Cancelar</button>
+                        <button type="button" class="btn btn-trade-buy" @onclick="ConfirmGenerateAsync" disabled="@isBusy">
+                            @if (isBusy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            Generar operación
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @* ---------- Filtros y tabla (RF-2) ---------- *@
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <div class="btn-group" role="group" aria-label="Estado">
+                @foreach (var option in FilterOptions)
+                {
+                    var value = option.Value;
+                    <button type="button" class="btn btn-sm @(filter == value ? "btn-primary" : "btn-outline-primary")"
+                            @onclick="() => SetFilterAsync(value)">@option.Label</button>
+                }
+            </div>
+            <select class="form-select form-select-sm" style="width:auto" value="@(companyFilter?.ToString() ?? "")" @onchange="OnCompanyFilterChangedAsync">
+                <option value="">Todas las empresas</option>
+                @foreach (var company in companies)
+                {
+                    <option value="@company.Id">@company.Name</option>
+                }
+            </select>
+        </div>
+
+        @if (lines.Count == 0)
+        {
+            <div class="alert alert-info d-flex align-items-center" role="alert">
+                <i class="bi bi-info-circle-fill me-2"></i>
+                <div>
+                    @(filter == DividendFilter.Collected ? "Todavía no hay dividendos cobrados." : "No hay dividendos en esta vista.")
+                    Usa «Nuevo dividendo», la fecha de dividendo de la ficha de la empresa o «Propuestas».
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="card shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0 dividends-table">
+                            <thead>
+                                <tr>
+                                    <th>Empresa</th>
+                                    <th>Ex-dividendo</th>
+                                    <th>Pago</th>
+                                    <th class="text-end">Importe por acción</th>
+                                    <th class="text-end">Acciones</th>
+                                    <th class="text-end">Importe total</th>
+                                    <th class="text-end">%</th>
+                                    <th>Estado</th>
+                                    <th>Origen</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var line in lines)
+                                {
+                                    var overdue = line.Status == DividendPaymentRules.StatusPending && line.PaymentDate.Date < DateTime.Today;
+                                    var blockReason = DividendPaymentRules.GetGenerateBlockReason(line, DateTime.Today);
+                                    <tr class="@(overdue ? "dividend-overdue" : "")">
+                                        <td>
+                                            <strong>@line.CompanyName</strong>
+                                            @if (!string.IsNullOrEmpty(line.Notes))
+                                            {
+                                                <div class="small text-muted">@line.Notes</div>
+                                            }
+                                        </td>
+                                        <td>@(line.ExDividendDate?.ToString("dd/MM/yyyy") ?? "—")</td>
+                                        <td>
+                                            @line.PaymentDate.ToString("dd/MM/yyyy")
+                                            @if (overdue)
+                                            {
+                                                <div class="small dividend-overdue-text"><i class="bi bi-exclamation-circle me-1"></i>Pago vencido, sin cobrar</div>
+                                            }
+                                        </td>
+                                        <td class="text-end">@(line.AmountPerShare.HasValue ? FormatPerShare(line.AmountPerShare.Value, line.CurrencyCode) : "—")</td>
+                                        <td class="text-end">@ShareQuantity.Format(line.NumberOfShares)</td>
+                                        <td class="text-end">@(line.TotalAmount.HasValue ? CurrencyFormatter.Format(line.TotalAmount.Value, line.CurrencyCode) : "—")</td>
+                                        <td class="text-end">@(line.DividendPercent.HasValue ? $"{line.DividendPercent.Value:N2} %" : "—")</td>
+                                        <td>
+                                            <span class="dividend-status @(line.Status == DividendPaymentRules.StatusCollected ? "collected" : "pending")">@line.Status</span>
+                                        </td>
+                                        <td class="small">@line.Source</td>
+                                        <td class="text-end text-nowrap">
+                                            @if (line.Status == DividendPaymentRules.StatusCollected)
+                                            {
+                                                <span class="small text-muted">Cobrado: para cambiarlo, borra la operación en Operaciones</span>
+                                            }
+                                            else if (confirmDeleteId == line.Id)
+                                            {
+                                                <span class="small me-1">¿Borrar este dividendo?</span>
+                                                <button type="button" class="btn btn-sm btn-danger py-0" @onclick="() => DeleteAsync(line.Id)" disabled="@isBusy">Sí</button>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary py-0" @onclick="() => confirmDeleteId = null">No</button>
+                                            }
+                                            else
+                                            {
+                                                @if (blockReason == null)
+                                                {
+                                                    <button type="button" class="btn btn-sm btn-trade-buy me-1" @onclick="() => OpenGenerateAsync(line)" disabled="@isBusy">
+                                                        <i class="bi bi-cash-coin me-1"></i>Generar operación
+                                                    </button>
+                                                }
+                                                else
+                                                {
+                                                    <span class="small text-muted me-1">@blockReason</span>
+                                                }
+                                                <button type="button" class="btn btn-sm btn-link py-0" title="Editar" @onclick="() => OpenEditForm(line)" disabled="@isBusy">
+                                                    <i class="bi bi-pencil"></i>
+                                                </button>
+                                                <button type="button" class="btn btn-sm btn-link text-danger py-0" title="Borrar" @onclick="() => confirmDeleteId = line.Id" disabled="@isBusy">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private static readonly (DividendFilter Value, string Label)[] FilterOptions =
+    {
+        (DividendFilter.Pending, "Pendientes"),
+        (DividendFilter.Collected, "Cobrados"),
+        (DividendFilter.All, "Todos")
+    };
+
+    private bool isLoading = true;
+    private bool isBusy;
+    private string? errorMessage;
+    private string? successMessage;
+
+    private DividendFilter filter = DividendFilter.Pending;
+    private int? companyFilter;
+    private List<DividendPayment> lines = new();
+    private DividendSummary summary = new();
+    private List<CompanyDetail> companies = new();
+    private string baseCurrencyCode = CurrencyFormatter.DefaultCurrency;
+
+    // Formulario de alta y edición: copia, nunca la entidad
+    private bool formOpen;
+    private int? editingId;
+    private DividendPaymentInput input = new();
+    private string? formError;
+    private LastDividendResult? lastDividend;
+    private bool isLoadingLastDividend;
+
+    // Generar la operación
+    private DividendPayment? generateLine;
+    private decimal generateAmount;
+    private string generateBankAccount = string.Empty;
+    private decimal? generateExchangeRate;
+    private string? generateError;
+    private List<BankAccount> bankAccounts = new();
+    private string? defaultBankAccountName;
+
+    private int? confirmDeleteId;
+
+    // Propuestas
+    private bool showProposals;
+    private List<DividendProposalView> proposals = new();
+
+    private string FormCurrency => CurrencyFormatter.Normalize(companies.FirstOrDefault(c => c.Id == input.CompanyId)?.CurrencyCode);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            baseCurrencyCode = CurrencyFormatter.Normalize((await CountryService.GetBaseCurrencyAsync()).CurrencyCode);
+
+            // Primero las empresas con acciones en cartera (RF-3)
+            companies = (await CompanyService.GetAllAsync())
+                .OrderByDescending(c => c.NumberOfShares > 0)
+                .ThenBy(c => c.Name)
+                .ToList();
+
+            proposals = await DividendService.GetProposalsAsync();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al cargar los dividendos: {ex.Message}");
+            errorMessage = "No se pudieron cargar los dividendos.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        lines = await DividendService.GetAsync(filter, companyFilter);
+        summary = await DividendService.GetSummaryAsync();
+    }
+
+    private async Task SetFilterAsync(DividendFilter value)
+    {
+        filter = value;
+        await LoadAsync();
+    }
+
+    private async Task OnCompanyFilterChangedAsync(ChangeEventArgs e)
+    {
+        companyFilter = int.TryParse(e.Value?.ToString(), out var id) && id > 0 ? id : null;
+        await LoadAsync();
+    }
+
+    private bool IsBaseCurrency(string currencyCode) =>
+        string.Equals(CurrencyFormatter.Normalize(currencyCode), baseCurrencyCode, StringComparison.OrdinalIgnoreCase);
+
+    // El importe por acción admite 4 decimales (SPEC-21-01, D11)
+    private static string FormatPerShare(decimal amount, string currencyCode) =>
+        $"{amount.ToString("0.00##", System.Globalization.CultureInfo.GetCultureInfo("es-ES"))} {CurrencyFormatter.Symbol(currencyCode)}";
+
+    // ---------------------------------------------------------------- Alta y edición
+
+    private void OpenNewForm()
+    {
+        CloseGenerate();
+        editingId = null;
+        input = new DividendPaymentInput { PaymentDate = DateTime.Today };
+        formError = null;
+        lastDividend = null;
+        formOpen = true;
+    }
+
+    private void OpenEditForm(DividendPayment line)
+    {
+        CloseGenerate();
+        editingId = line.Id;
+        input = new DividendPaymentInput
+        {
+            CompanyId = line.CompanyId,
+            PaymentDate = line.PaymentDate,
+            ExDividendDate = line.ExDividendDate,
+            AmountPerShare = line.AmountPerShare,
+            NumberOfShares = line.NumberOfShares,
+            DividendPercent = line.DividendPercent,
+            Notes = line.Notes
+        };
+        formError = null;
+        lastDividend = null;
+        formOpen = true;
+    }
+
+    private void CloseForm()
+    {
+        formOpen = false;
+        editingId = null;
+        formError = null;
+        lastDividend = null;
+    }
+
+    private async Task OnCompanyChangedAsync(ChangeEventArgs e)
+    {
+        input.CompanyId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+        lastDividend = null;
+        if (input.CompanyId > 0)
+        {
+            // Se proponen las acciones en cartera (editable)
+            input.NumberOfShares = await DividendService.GetDefaultSharesAsync(input.CompanyId);
+        }
+    }
+
+    private async Task SaveFormAsync()
+    {
+        isBusy = true;
+        formError = null;
+        try
+        {
+            var result = editingId.HasValue
+                ? await DividendService.UpdateAsync(editingId.Value, input)
+                : await DividendService.CreateAsync(input);
+            if (!result.Success)
+            {
+                formError = result.ErrorMessage;
+                return;
+            }
+
+            successMessage = editingId.HasValue ? "Dividendo actualizado." : "Dividendo creado.";
+            CloseForm();
+            proposals = await DividendService.GetProposalsAsync();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al guardar el dividendo: {ex.Message}");
+            formError = "No se pudo guardar el dividendo. No se ha modificado nada.";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task LoadLastDividendAsync()
+    {
+        if (input.CompanyId <= 0)
+        {
+            return;
+        }
+
+        isLoadingLastDividend = true;
+        try
+        {
+            lastDividend = await DividendService.GetLastDividendAsync(input.CompanyId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al consultar el último dividendo: {ex.Message}");
+            lastDividend = new LastDividendResult { Message = "No se pudo consultar Yahoo Finance." };
+        }
+        finally
+        {
+            isLoadingLastDividend = false;
+        }
+    }
+
+    private void UseLastDividendAmount()
+    {
+        if (lastDividend?.Dividend != null)
+        {
+            input.AmountPerShare = Math.Round(lastDividend.Dividend.Amount, 4);
+        }
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        isBusy = true;
+        confirmDeleteId = null;
+        try
+        {
+            var result = await DividendService.DeleteAsync(id);
+            if (!result.Success)
+            {
+                errorMessage = result.ErrorMessage;
+                return;
+            }
+
+            successMessage = "Dividendo borrado.";
+            proposals = await DividendService.GetProposalsAsync();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al borrar el dividendo: {ex.Message}");
+            errorMessage = "No se pudo borrar el dividendo.";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    // ---------------------------------------------------------------- Generar la operación (RF-6)
+
+    private async Task OpenGenerateAsync(DividendPayment line)
+    {
+        CloseForm();
+        generateLine = line;
+        generateAmount = line.TotalAmount ?? 0m;
+        generateBankAccount = string.Empty;
+        generateError = null;
+        generateExchangeRate = IsBaseCurrency(line.CurrencyCode)
+            ? null
+            : (await ExchangeRateService.GetCurrentRateAsync(line.CurrencyCode))?.Rate;
+        bankAccounts = await BankService.GetAllBankAccountsAsync();
+        defaultBankAccountName = (await BankService.GetDefaultBankAccountAsync())?.Name;
+    }
+
+    private void CloseGenerate()
+    {
+        generateLine = null;
+        generateError = null;
+    }
+
+    private async Task ConfirmGenerateAsync()
+    {
+        if (generateLine == null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        generateError = null;
+        try
+        {
+            var result = await DividendService.GenerateOperationAsync(
+                generateLine.Id,
+                generateAmount,
+                generateBankAccount,
+                IsBaseCurrency(generateLine.CurrencyCode) ? null : generateExchangeRate);
+            if (!result.Success)
+            {
+                // No se ha creado nada: el formulario sigue abierto para corregir
+                generateError = result.ErrorMessage;
+                return;
+            }
+
+            successMessage = $"Dividendo de {generateLine.CompanyName} registrado: {CurrencyFormatter.Format(Math.Round(generateAmount, 2), generateLine.CurrencyCode)}.";
+            CloseGenerate();
+            await LoadAsync();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    // ---------------------------------------------------------------- Propuestas (RF-11)
+
+    private void ToggleProposals()
+    {
+        showProposals = !showProposals;
+    }
+
+    private async Task CreateSelectedProposalsAsync()
+    {
+        isBusy = true;
+        try
+        {
+            var result = await DividendService.CreateFromProposalsAsync(proposals.Where(p => p.Selected && !p.AlreadyExists));
+            successMessage = result.Created == 1
+                ? "Se ha creado 1 dividendo pendiente."
+                : $"Se han creado {result.Created} dividendos pendientes.";
+            proposals = await DividendService.GetProposalsAsync();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al crear las propuestas: {ex.Message}");
+            errorMessage = "No se pudieron crear las propuestas. No se ha creado nada.";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+}

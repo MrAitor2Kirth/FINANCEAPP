@@ -18,6 +18,7 @@ namespace FINANCEAPP.Services
         private const string ChartShowAverageKey = "CompanyChart.ShowAverage";
         private const string ChartShowCandlesKey = "CompanyChart.ShowCandles";
         private const string ChartShowVolumeKey = "CompanyChart.ShowVolume";
+        private const string ChartShowMarksKey = "CompanyChart.ShowMarks";
 
         private readonly AppDbContext _context;
         private AppLogoImage? _cachedLogo;
@@ -261,7 +262,7 @@ namespace FINANCEAPP.Services
         {
             try
             {
-                var keys = new[] { ChartShowAverageKey, ChartShowCandlesKey, ChartShowVolumeKey };
+                var keys = new[] { ChartShowAverageKey, ChartShowCandlesKey, ChartShowVolumeKey, ChartShowMarksKey };
                 var rows = await _context.AppSettings
                     .AsNoTracking()
                     .Where(s => keys.Contains(s.Key))
@@ -273,7 +274,9 @@ namespace FINANCEAPP.Services
                 {
                     ShowAverage = Read(ChartShowAverageKey),
                     ShowCandles = Read(ChartShowCandlesKey),
-                    ShowVolume = Read(ChartShowVolumeKey)
+                    ShowVolume = Read(ChartShowVolumeKey),
+                    // Las marcas se ven salvo que el usuario las haya ocultado (sin fila = activado)
+                    ShowMarks = !rows.TryGetValue(ChartShowMarksKey, out var marks) || marks != "false"
                 };
             }
             catch (Exception ex)
@@ -290,6 +293,7 @@ namespace FINANCEAPP.Services
                 await UpsertTextAsync(ChartShowAverageKey, preferences.ShowAverage ? "true" : "false");
                 await UpsertTextAsync(ChartShowCandlesKey, preferences.ShowCandles ? "true" : "false");
                 await UpsertTextAsync(ChartShowVolumeKey, preferences.ShowVolume ? "true" : "false");
+                await UpsertTextAsync(ChartShowMarksKey, preferences.ShowMarks ? "true" : "false");
                 await _context.SaveChangesAsync();
                 return AppSettingResult.Ok();
             }

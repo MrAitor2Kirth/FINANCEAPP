@@ -192,6 +192,9 @@ namespace FINANCEAPP
             builder.Services.AddScoped<IPropertyDocumentService, PropertyDocumentService>();
             builder.Services.AddScoped<IClaudeApiKeyStore, ClaudeApiKeyStore>();
             builder.Services.AddScoped<IWealthSnapshotService, WealthSnapshotService>();
+            builder.Services.AddScoped<IChartMarkService, ChartMarkService>();
+            builder.Services.AddScoped<IDividendService, DividendService>();
+            builder.Services.AddScoped<IBenchmarkIndexService, BenchmarkIndexService>();
             builder.Services.AddHttpClient<IClaudeDocumentReader, ClaudeDocumentReader>(client =>
             {
                 client.Timeout = TimeSpan.FromSeconds(60);
@@ -221,6 +224,14 @@ namespace FINANCEAPP
                 DatabaseSchemaUpgrader.EnsureMarketCatalogTable(context);
                 DatabaseSchemaUpgrader.EnsurePropertyDocumentsTable(context);
                 DatabaseSchemaUpgrader.EnsureWealthSnapshotsTable(context);
+                DatabaseSchemaUpgrader.EnsureBankAccountOpeningBalanceColumn(context);
+                DatabaseSchemaUpgrader.EnsureBankOperationSaleColumn(context);
+                DatabaseSchemaUpgrader.EnsureBankOperationTradeColumn(context);
+                DatabaseSchemaUpgrader.EnsureBankOperationTransferColumn(context);
+                DatabaseSchemaUpgrader.EnsureChartMarksTable(context);
+                DatabaseSchemaUpgrader.EnsureDividendPaymentsTable(context);
+                DatabaseSchemaUpgrader.EnsureCompanyNextDividendDateColumn(context);
+                DatabaseSchemaUpgrader.EnsureBenchmarkTables(context);
 
                 // Corrige inmuebles antiguos guardados con total invertido 0 (no tocaba el patrimonio)
                 DatabaseSchemaUpgrader.RepairPropertyTotals(context);
@@ -229,6 +240,10 @@ namespace FINANCEAPP
                 // Task.Run evita bloquear el hilo principal esperando a sí mismo.
                 var operationService = scope.ServiceProvider.GetRequiredService<FINANCEAPP.Services.IOperationService>();
                 Task.Run(() => operationService.RepairOrphanSaleLinksAsync()).GetAwaiter().GetResult();
+
+                // Devuelve a Pendiente las líneas de dividendo cobradas cuya operación ya no existe (SPEC-21-01, RF-4)
+                var dividendService = scope.ServiceProvider.GetRequiredService<FINANCEAPP.Services.IDividendService>();
+                Task.Run(() => dividendService.RepairOrphanLinksAsync()).GetAwaiter().GetResult();
 
                 // Borra copias temporales de documentos abiertos en sesiones anteriores
                 PropertyDocumentService.CleanTempFiles();

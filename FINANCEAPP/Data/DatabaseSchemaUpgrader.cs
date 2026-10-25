@@ -140,7 +140,7 @@ namespace FINANCEAPP.Data
                         ""CompanyName"" TEXT NOT NULL,
                         ""Ticker"" TEXT NOT NULL,
                         ""SaleDate"" TEXT NOT NULL,
-                        ""NumberOfShares"" INTEGER NOT NULL,
+                        ""NumberOfShares"" decimal(18,2) NOT NULL,
                         ""AverageBuyPrice"" decimal(18,4) NOT NULL,
                         ""SellPrice"" decimal(18,2) NOT NULL,
                         ""Amount"" decimal(18,2) NOT NULL,
@@ -477,6 +477,181 @@ namespace FINANCEAPP.Data
         }
 
         /// <summary>
+        /// Crea la tabla DividendPayments (calendario de dividendos, SPEC-21-01) y sus índices si no existen.
+        /// No toca ninguna otra tabla ni dato.
+        /// </summary>
+        public static void EnsureDividendPaymentsTable(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var create = connection.CreateCommand();
+                create.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""DividendPayments"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_DividendPayments"" PRIMARY KEY AUTOINCREMENT,
+                        ""CompanyId"" INTEGER NOT NULL,
+                        ""PaymentDate"" TEXT NOT NULL,
+                        ""ExDividendDate"" TEXT NULL,
+                        ""AmountPerShare"" decimal(18,4) NULL,
+                        ""NumberOfShares"" decimal(18,2) NOT NULL DEFAULT 0,
+                        ""DividendPercent"" decimal(18,2) NULL,
+                        ""Status"" TEXT NOT NULL DEFAULT 'Pendiente',
+                        ""OperationId"" INTEGER NULL,
+                        ""Source"" TEXT NOT NULL DEFAULT 'Manual',
+                        ""Notes"" TEXT NULL,
+                        ""CreatedAt"" TEXT NOT NULL,
+                        ""UpdatedAt"" TEXT NOT NULL
+                    );
+                ";
+                create.ExecuteNonQuery();
+
+                using var indexes = connection.CreateCommand();
+                indexes.CommandText = @"
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_DividendPayments_CompanyId_PaymentDate"" ON ""DividendPayments"" (""CompanyId"", ""PaymentDate"");
+                    CREATE INDEX IF NOT EXISTS ""IX_DividendPayments_OperationId"" ON ""DividendPayments"" (""OperationId"");
+                ";
+                indexes.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Añade la columna nula NextDividendDate a CompanyDetails si falta (SPEC-21-01). Las empresas existentes se quedan sin fecha.
+        /// </summary>
+        public static void EnsureCompanyNextDividendDateColumn(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var existingColumns = GetExistingColumns(connection, "CompanyDetails");
+                AddColumnIfMissing(connection, existingColumns, "CompanyDetails", "NextDividendDate", "TEXT NULL");
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Crea la tabla ChartMarks (marcas del gráfico de cotización, SPEC-05-03) y su índice si no existen.
+        /// CompanyId nulo = marca global. No toca ninguna otra tabla ni dato.
+        /// </summary>
+        public static void EnsureChartMarksTable(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var create = connection.CreateCommand();
+                create.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""ChartMarks"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_ChartMarks"" PRIMARY KEY AUTOINCREMENT,
+                        ""CompanyId"" INTEGER NULL,
+                        ""Date"" TEXT NOT NULL,
+                        ""Description"" TEXT NOT NULL,
+                        ""IsActive"" INTEGER NOT NULL DEFAULT 1,
+                        ""CreatedAt"" TEXT NOT NULL,
+                        ""UpdatedAt"" TEXT NOT NULL
+                    );
+                ";
+                create.ExecuteNonQuery();
+
+                using var index = connection.CreateCommand();
+                index.CommandText = @"CREATE INDEX IF NOT EXISTS ""IX_ChartMarks_CompanyId_Date"" ON ""ChartMarks"" (""CompanyId"", ""Date"");";
+                index.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Crea las tablas BenchmarkIndices y BenchmarkPricePoints (índices para comparar en el gráfico, SPEC-05-04)
+        /// y sus índices únicos si no existen. Sin claves foráneas. No toca ninguna otra tabla ni dato.
+        /// </summary>
+        public static void EnsureBenchmarkTables(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ""BenchmarkIndices"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_BenchmarkIndices"" PRIMARY KEY AUTOINCREMENT,
+                        ""Name"" TEXT NOT NULL,
+                        ""Symbol"" TEXT NOT NULL,
+                        ""CreatedAt"" TEXT NOT NULL,
+                        ""UpdatedAt"" TEXT NOT NULL
+                    );
+
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_BenchmarkIndices_Symbol"" ON ""BenchmarkIndices"" (""Symbol"");
+
+                    CREATE TABLE IF NOT EXISTS ""BenchmarkPricePoints"" (
+                        ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_BenchmarkPricePoints"" PRIMARY KEY AUTOINCREMENT,
+                        ""BenchmarkIndexId"" INTEGER NOT NULL,
+                        ""Date"" TEXT NOT NULL,
+                        ""Open"" decimal(18,4) NOT NULL,
+                        ""High"" decimal(18,4) NOT NULL,
+                        ""Low"" decimal(18,4) NOT NULL,
+                        ""Close"" decimal(18,4) NOT NULL,
+                        ""Volume"" INTEGER NOT NULL,
+                        ""FetchedAt"" TEXT NOT NULL
+                    );
+
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_BenchmarkPricePoints_BenchmarkIndexId_Date"" ON ""BenchmarkPricePoints"" (""BenchmarkIndexId"", ""Date"");
+                ";
+                command.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
         /// Crea la tabla WealthSnapshots (capturas mensuales del patrimonio, SPEC-17-01) y su índice
         /// único por año y mes si no existen. No toca ninguna otra tabla ni dato.
         /// </summary>
@@ -697,6 +872,150 @@ namespace FINANCEAPP.Data
             parameter.Value = value;
             command.Parameters.Add(parameter);
             return parameter;
+        }
+
+        /// <summary>
+        /// Verifica que la tabla BankAccounts tenga la columna OpeningBalance (saldo inicial).
+        /// Solo al crearla calcula su valor como saldo actual menos el efecto de los movimientos
+        /// de cada cuenta, de modo que el saldo mostrado no cambia. Si ya existe, no hace nada.
+        /// </summary>
+        public static void EnsureBankAccountOpeningBalanceColumn(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var existingColumns = GetExistingColumns(connection, "BankAccounts");
+                if (existingColumns.Contains("OpeningBalance"))
+                {
+                    return;
+                }
+
+                AddColumnIfMissing(connection, existingColumns, "BankAccounts", "OpeningBalance", "decimal(18,2) NOT NULL DEFAULT 0");
+
+                using var command = connection.CreateCommand();
+                command.CommandText = @"
+                    UPDATE ""BankAccounts"" SET ""OpeningBalance"" = ""CurrentBalance"" - COALESCE((
+                        SELECT SUM(CASE
+                            WHEN ""Type"" IN ('Ingreso', 'Intereses', 'Traspaso Entrada') THEN ABS(""Amount"")
+                            WHEN ""Type"" IN ('Gasto', 'Comisiones', 'Traspaso Salida') THEN -ABS(""Amount"")
+                            ELSE 0 END)
+                        FROM ""BankOperations""
+                        WHERE ""BankOperations"".""AccountName"" = ""BankAccounts"".""Name""), 0);";
+                command.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Verifica que la tabla BankOperations tenga la columna SaleHistoryId (ingreso generado por una venta,
+        /// SPEC-02-04) y su índice. Columna nula: no toca los datos existentes.
+        /// </summary>
+        public static void EnsureBankOperationSaleColumn(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var existingColumns = GetExistingColumns(connection, "BankOperations");
+
+                AddColumnIfMissing(connection, existingColumns, "BankOperations", "SaleHistoryId", "INTEGER NULL");
+
+                using var command = connection.CreateCommand();
+                command.CommandText = @"CREATE INDEX IF NOT EXISTS ""IX_BankOperations_SaleHistoryId"" ON ""BankOperations"" (""SaleHistoryId"");";
+                command.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Verifica que la tabla BankOperations tenga la columna OperationId (movimiento generado por una compra
+        /// o un dividendo, SPEC-02-06) y su índice. Columna nula: no toca los datos existentes.
+        /// </summary>
+        public static void EnsureBankOperationTradeColumn(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var existingColumns = GetExistingColumns(connection, "BankOperations");
+
+                AddColumnIfMissing(connection, existingColumns, "BankOperations", "OperationId", "INTEGER NULL");
+
+                using var command = connection.CreateCommand();
+                command.CommandText = @"CREATE INDEX IF NOT EXISTS ""IX_BankOperations_OperationId"" ON ""BankOperations"" (""OperationId"");";
+                command.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Verifica que la tabla BankOperations tenga la columna TransferId (patas de un traspaso entre cuentas,
+        /// SPEC-10-02) y su índice. Columna nula: no toca los datos existentes.
+        /// </summary>
+        public static void EnsureBankOperationTransferColumn(AppDbContext context)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var existingColumns = GetExistingColumns(connection, "BankOperations");
+
+                AddColumnIfMissing(connection, existingColumns, "BankOperations", "TransferId", "INTEGER NULL");
+
+                using var command = connection.CreateCommand();
+                command.CommandText = @"CREATE INDEX IF NOT EXISTS ""IX_BankOperations_TransferId"" ON ""BankOperations"" (""TransferId"");";
+                command.ExecuteNonQuery();
+            }
+            finally
+            {
+                if (shouldClose)
+                {
+                    connection.Close();
+                }
+            }
         }
 
         private static HashSet<string> GetExistingColumns(System.Data.Common.DbConnection connection, string tableName)

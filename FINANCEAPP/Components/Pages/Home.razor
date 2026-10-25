@@ -1,6 +1,7 @@
 ﻿@page "/"
 @using FINANCEAPP.Services
 @inject IDashboardService DashboardService
+@inject IDividendService DividendService
 
 <PageTitle>Inicio</PageTitle>
 
@@ -9,6 +10,33 @@
     <p class="eyebrow">Patrimonio total</p>
     <p class="home-balance">@CurrencyFormatter.Format(totalPatrimony, currencyCode)</p>
     <a class="btn btn-primary" href="dashboard">Ver el patrimonio completo</a>
+</section>
+
+@* Próximos dividendos de las empresas en cartera, 90 días (SPEC-21-01, RF-8) *@
+<section class="home-dividends">
+    <div class="d-flex justify-content-between align-items-baseline">
+        <h2 class="section-title">Próximos dividendos</h2>
+        <a href="dividends">Ver dividendos</a>
+    </div>
+    @if (upcomingDividends.Count == 0)
+    {
+        <p class="text-muted mb-0">No hay dividendos en los próximos 90 días.</p>
+    }
+    else
+    {
+        <ul class="home-dividend-list">
+            @foreach (var dividend in upcomingDividends)
+            {
+                <li>
+                    <span class="home-dividend-date">@dividend.PaymentDate.ToString("dd/MM/yyyy")</span>
+                    <span class="home-dividend-company">@dividend.CompanyName</span>
+                    <span class="home-dividend-amount">
+                        @(dividend.TotalAmount.HasValue ? CurrencyFormatter.Format(dividend.TotalAmount.Value, dividend.CurrencyCode) : "Importe por confirmar")
+                    </span>
+                </li>
+            }
+        </ul>
+    }
 </section>
 
 <h2 class="section-title">Módulos</h2>
@@ -46,6 +74,7 @@
 
 @code {
     private decimal totalPatrimony = 0m;
+    private List<UpcomingDividend> upcomingDividends = new();
     private string currencyCode = CurrencyFormatter.DefaultCurrency;
 
     protected override async Task OnInitializedAsync()
@@ -61,6 +90,15 @@
         catch
         {
             totalPatrimony = 0m;
+        }
+
+        try
+        {
+            upcomingDividends = await DividendService.GetUpcomingAsync();
+        }
+        catch
+        {
+            upcomingDividends = new();
         }
     }
 }

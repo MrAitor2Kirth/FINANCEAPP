@@ -77,6 +77,13 @@ namespace FINANCEAPP.Models
         public decimal DividendYield { get; set; }
 
         /// <summary>
+        /// Próxima fecha de pago de dividendo escrita en la ficha (SPEC-21-01, RF-5). Al guardarla con una fecha nueva
+        /// se crea una línea en DividendPayments; cambiarla después no toca las líneas anteriores.
+        /// </summary>
+        [Display(Name = "Próxima fecha de dividendo")]
+        public DateTime? NextDividendDate { get; set; }
+
+        /// <summary>
         /// Fecha de creaci├│n del registro
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.Now;
@@ -123,7 +130,8 @@ namespace FINANCEAPP.Models
         /// Se calcula sumando el n├║mero de acciones de las operaciones abiertas (no cerradas) de la empresa
         /// </summary>
         [Display(Name = "N├║mero de Acciones")]
-        public int NumberOfShares { get; set; }
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal NumberOfShares { get; set; }
 
         /// <summary>
         /// Propiedad calculada que multiplica el precio actual por el n├║mero de acciones

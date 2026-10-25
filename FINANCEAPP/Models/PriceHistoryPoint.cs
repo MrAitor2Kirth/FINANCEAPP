@@ -61,6 +61,13 @@ namespace FINANCEAPP.Models
         /// </summary>
         public DateTime FetchedAt { get; set; } = DateTime.Now;
 
+        /// <summary>
+        /// Dinero negociado aproximado del periodo (acciones × cierre) en la divisa de la empresa.
+        /// Se calcula al leer y no se guarda (SPEC-05-03)
+        /// </summary>
+        [NotMapped]
+        public decimal TradedValue { get; set; }
+
         [ForeignKey(nameof(CompanyId))]
         public CompanyDetail? Company { get; set; }
     }

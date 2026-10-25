@@ -1,0 +1,122 @@
+@using FINANCEAPP.Models
+@using FINANCEAPP.Services
+@using Microsoft.Extensions.Logging
+@inject IBankService BankService
+@inject ILogger<BankTransferForm> Logger
+
+@* Traspaso entre dos cuentas (SPEC-10-02): crea la salida en el origen y la entrada en el destino *@
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <h6 class="mb-3"><i class="bi bi-arrow-left-right me-1" aria-hidden="true"></i> Traspaso entre cuentas</h6>
+        <div class="row g-2">
+            <div class="col-md-3">
+                <label class="form-label small mb-0">Cuenta origen</label>
+                <select class="form-select form-select-sm" @bind="fromAccount">
+                    <option value="">Seleccionar cuenta...</option>
+                    @foreach (var account in Accounts)
+                    {
+                        <option value="@account.Name">@account.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small mb-0">Cuenta destino</label>
+                <select class="form-select form-select-sm" @bind="toAccount">
+                    <option value="">Seleccionar cuenta...</option>
+                    @foreach (var account in Accounts)
+                    {
+                        <option value="@account.Name">@account.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-0">Importe</label>
+                <input type="number" class="form-control form-control-sm" placeholder="Importe (en positivo)"
+                       @bind="amount" step="0.01" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-0">Fecha</label>
+                <input type="date" class="form-control form-control-sm" @bind="date" />
+            </div>
+            <div class="col-md-2 d-flex align-items-end gap-1">
+                <button class="btn btn-sm btn-primary" disabled="@isSaving" @onclick="SaveTransfer">Traspasar</button>
+                <button class="btn btn-sm btn-outline-secondary" disabled="@isSaving" @onclick="Cancel">Cancelar</button>
+            </div>
+        </div>
+        <div class="row g-2 mt-1">
+            <div class="col-12">
+                <input type="text" class="form-control form-control-sm" placeholder="Descripción (opcional)"
+                       @bind="description" />
+            </div>
+        </div>
+        @if (!string.IsNullOrEmpty(message))
+        {
+            <div class="alert @(messageIsError ? "alert-danger" : "alert-success") py-2 mt-2 mb-0" role="alert">@message</div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public List<BankAccount> Accounts { get; set; } = new();
+
+    [Parameter]
+    public EventCallback OnTransferred { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private string fromAccount = string.Empty;
+    private string toAccount = string.Empty;
+    private decimal? amount;
+    private DateTime? date = DateTime.Today;
+    private string? description;
+
+    private bool isSaving;
+    private string? message;
+    private bool messageIsError;
+
+    private async Task SaveTransfer()
+    {
+        if (isSaving)
+        {
+            return;
+        }
+
+        isSaving = true;
+        message = null;
+
+        try
+        {
+            // Las reglas de validación viven en BankService; aquí solo se recogen los datos
+            await BankService.CreateTransferAsync(fromAccount, toAccount, amount ?? 0, date ?? default, description);
+
+            message = "Traspaso realizado.";
+            messageIsError = false;
+            amount = null;
+            description = null;
+            date = DateTime.Today;
+            await OnTransferred.InvokeAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            message = ex.Message;
+            messageIsError = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error al crear el traspaso");
+            message = "No se pudo realizar el traspaso. Inténtalo de nuevo.";
+            messageIsError = true;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private async Task Cancel()
+    {
+        await OnCancel.InvokeAsync();
+    }
+}

@@ -12,15 +12,32 @@ namespace FINANCEAPP.Services
     {
         private readonly AppDbContext _context;
         private readonly IStockPriceService _stockPriceService;
+        private readonly IBankService _bankService;
 
         /// <summary>
         /// Constructor que inyecta el contexto de base de datos
         /// </summary>
         /// <param name="context">Contexto de Entity Framework</param>
-        public CompanyService(AppDbContext context, IStockPriceService stockPriceService)
+        public CompanyService(AppDbContext context, IStockPriceService stockPriceService, IBankService bankService)
         {
             _context = context;
             _stockPriceService = stockPriceService;
+            _bankService = bankService;
+        }
+
+        /// <summary>
+        /// Claves de enlace de los movimientos bancarios de las compras y dividendos de una empresa (SPEC-02-06)
+        /// </summary>
+        private async Task<List<int>> GetTradeMovementKeysAsync(string companyName)
+        {
+            var operations = await _context.Operations
+                .AsNoTracking()
+                .Where(o => o.CompanyName == companyName && (o.Type == "Compra" || o.Type == "Dividendo"))
+                .ToListAsync();
+            return operations
+                .Select(OperationAmountCalculator.GetTradeMovementKey)
+                .Distinct()
+                .ToList();
         }
 
         /// <summary>
@@ -155,9 +172,54 @@ namespace FINANCEAPP.Services
             company.CreatedAt = DateTime.Now;
             company.UpdatedAt = DateTime.Now;
             company.CountryCode = NormalizeCountryCode(company.CountryCode);
-            _context.CompanyDetails.Add(company);
-            await _context.SaveChangesAsync();
-            return company;
+            company.NextDividendDate = company.NextDividendDate?.Date;
+
+            // La empresa necesita su Id para la línea de dividendo de la ficha: las dos van en una transacción (SPEC-21-01, RF-5)
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                _context.CompanyDetails.Add(company);
+                await _context.SaveChangesAsync();
+
+                if (company.NextDividendDate.HasValue)
+                {
+                    await AddDividendFromFormAsync(company.Id, company.NextDividendDate.Value, company.NumberOfShares);
+                    await _context.SaveChangesAsync();
+                }
+
+                await transaction.CommitAsync();
+                return company;
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Añade (sin guardar) la línea Pendiente de la fecha de dividendo de la ficha si la empresa no tiene ya una con esa
+        /// fecha de pago (SPEC-21-01, RF-5). Nunca toca las líneas anteriores.
+        /// </summary>
+        private async Task AddDividendFromFormAsync(int companyId, DateTime paymentDate, decimal shares)
+        {
+            var date = paymentDate.Date;
+            if (await _context.DividendPayments.AnyAsync(d => d.CompanyId == companyId && d.PaymentDate == date))
+            {
+                return;
+            }
+
+            var now = DateTime.Now;
+            _context.DividendPayments.Add(new DividendPayment
+            {
+                CompanyId = companyId,
+                PaymentDate = date,
+                NumberOfShares = shares,
+                Status = DividendPaymentRules.StatusPending,
+                Source = DividendPaymentRules.SourceCompanyForm,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
         }
 
         /// <summary>
@@ -211,6 +273,15 @@ namespace FINANCEAPP.Services
             existing.CurrentPrice = company.CurrentPrice;
             existing.LivePrice = company.LivePrice;
             existing.DividendYield = company.DividendYield;
+
+            // Una fecha de dividendo nueva o distinta crea su línea en el mismo guardado; vaciarla no borra nada (SPEC-21-01, RF-5)
+            var newDividendDate = company.NextDividendDate?.Date;
+            if (newDividendDate.HasValue && newDividendDate != existing.NextDividendDate?.Date)
+            {
+                await AddDividendFromFormAsync(existing.Id, newDividendDate.Value, existing.NumberOfShares);
+            }
+            existing.NextDividendDate = newDividendDate;
+
             existing.PlusvaliaReturnPercent = existing.CalculatePlusvaliaReturnPercent();
             existing.DividendPlusvaliaReturnPercent = existing.CalculateDividendPlusvaliaReturnPercent();
             existing.UpdatedAt = DateTime.Now;
@@ -310,6 +381,9 @@ namespace FINANCEAPP.Services
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
+                // Los movimientos bancarios de sus compras y dividendos desaparecen con ellas (SPEC-02-06)
+                await _bankService.RemoveTradeMovementsAsync(await GetTradeMovementKeysAsync(company.Name));
+
                 var operations = await _context.Operations
                     .Where(o => o.CompanyName == company.Name)
                     .ToListAsync();
@@ -319,6 +393,25 @@ namespace FINANCEAPP.Services
                     .Where(p => p.CompanyId == company.Id)
                     .ToListAsync();
                 _context.PriceHistoryPoints.RemoveRange(priceHistory);
+
+                // Indicador de histórico completo del gráfico (SPEC-05-02)
+                var historyComplete = await _context.AppSettings.FindAsync(PriceHistoryService.GetCompleteKey(company.Id));
+                if (historyComplete != null)
+                {
+                    _context.AppSettings.Remove(historyComplete);
+                }
+
+                // Calendario de dividendos de la empresa (SPEC-21-01, RF-13)
+                var dividendPayments = await _context.DividendPayments
+                    .Where(d => d.CompanyId == company.Id)
+                    .ToListAsync();
+                _context.DividendPayments.RemoveRange(dividendPayments);
+
+                // Marcas del gráfico de esta empresa; las globales se conservan (SPEC-05-03)
+                var companyMarks = await _context.ChartMarks
+                    .Where(m => m.CompanyId == company.Id)
+                    .ToListAsync();
+                _context.ChartMarks.RemoveRange(companyMarks);
 
                 _context.CompanyDetails.Remove(company);
                 await _context.SaveChangesAsync();
@@ -330,6 +423,41 @@ namespace FINANCEAPP.Services
                 await transaction.RollbackAsync();
                 throw;
             }
+        }
+
+        public async Task<int> CountBankMovementsAsync(string companyName)
+        {
+            if (string.IsNullOrWhiteSpace(companyName))
+            {
+                return 0;
+            }
+
+            return await _bankService.CountTradeMovementsAsync(await GetTradeMovementKeysAsync(companyName));
+        }
+
+        public async Task<int> CountDividendPaymentsAsync(int companyId)
+        {
+            return await _context.DividendPayments.CountAsync(d => d.CompanyId == companyId);
+        }
+
+        public async Task<string?> GetNextDividendStatusAsync(int companyId)
+        {
+            var nextDate = await _context.CompanyDetails
+                .AsNoTracking()
+                .Where(c => c.Id == companyId)
+                .Select(c => c.NextDividendDate)
+                .FirstOrDefaultAsync();
+            if (!nextDate.HasValue)
+            {
+                return null;
+            }
+
+            var date = nextDate.Value.Date;
+            return await _context.DividendPayments
+                .AsNoTracking()
+                .Where(d => d.CompanyId == companyId && d.PaymentDate == date)
+                .Select(d => d.Status)
+                .FirstOrDefaultAsync();
         }
 
         public async Task<int> CountOperationsAsync(string companyName)
@@ -404,7 +532,8 @@ namespace FINANCEAPP.Services
             var adjustedTotal = total - soldAmount;
 
             company.TotalInvestedInitial = adjustedTotal;
-            company.NumberOfShares = shares;
+            // Acciones con hasta 2 decimales (SPEC-02-08); se redondea por si SQLite las devuelve como reales
+            company.NumberOfShares = ShareQuantity.Round(shares);
             company.TotalDividends = dividends;
             company.PlusvaliaReturnPercent = company.CalculatePlusvaliaReturnPercent();
             company.DividendPlusvaliaReturnPercent = company.CalculateDividendPlusvaliaReturnPercent();

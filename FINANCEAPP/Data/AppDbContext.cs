@@ -133,6 +133,26 @@ namespace FINANCEAPP.Data
         public DbSet<WealthSnapshot> WealthSnapshots { get; set; }
 
         /// <summary>
+        /// DbSet de las marcas temporales del gráfico de cotización (SPEC-05-03). Tabla ChartMarks
+        /// </summary>
+        public DbSet<ChartMark> ChartMarks { get; set; }
+
+        /// <summary>
+        /// DbSet de los índices para comparar en el gráfico (SPEC-05-04). Tabla BenchmarkIndices
+        /// </summary>
+        public DbSet<BenchmarkIndex> BenchmarkIndices { get; set; }
+
+        /// <summary>
+        /// DbSet del histórico diario de los índices (SPEC-05-04). Tabla BenchmarkPricePoints
+        /// </summary>
+        public DbSet<BenchmarkPricePoint> BenchmarkPricePoints { get; set; }
+
+        /// <summary>
+        /// DbSet del calendario de dividendos (SPEC-21-01). Tabla DividendPayments
+        /// </summary>
+        public DbSet<DividendPayment> DividendPayments { get; set; }
+
+        /// <summary>
         /// Configuración del modelo de datos
         /// Establece índices, relaciones y constraints adicionales
         /// </summary>
@@ -326,6 +346,15 @@ namespace FINANCEAPP.Data
 
                 entity.HasIndex(e => e.Type)
                     .HasDatabaseName("IX_BankOperations_Type");
+
+                entity.HasIndex(e => e.SaleHistoryId)
+                    .HasDatabaseName("IX_BankOperations_SaleHistoryId");
+
+                entity.HasIndex(e => e.OperationId)
+                    .HasDatabaseName("IX_BankOperations_OperationId");
+
+                entity.HasIndex(e => e.TransferId)
+                    .HasDatabaseName("IX_BankOperations_TransferId");
 
                 entity.Property(e => e.AccountName)
                     .IsRequired()
@@ -743,6 +772,7 @@ namespace FINANCEAPP.Data
                     IBAN = "ES1234567890123456789012",
                     AccountType = "Corriente",
                     CurrentBalance = 5500.00m,
+                    OpeningBalance = 3850.00m,
                     CreatedAt = DateTime.Now.AddYears(-2),
                     UpdatedAt = DateTime.Now
                 },
@@ -754,6 +784,7 @@ namespace FINANCEAPP.Data
                     IBAN = "ES9876543210987654321098",
                     AccountType = "Ahorro",
                     CurrentBalance = 12000.00m,
+                    OpeningBalance = 10000.00m,
                     CreatedAt = DateTime.Now.AddYears(-1),
                     UpdatedAt = DateTime.Now
                 }
@@ -998,6 +1029,63 @@ namespace FINANCEAPP.Data
 
                 entity.Property(e => e.CurrencyCode).IsRequired().HasMaxLength(3);
                 entity.Property(e => e.Note).HasMaxLength(200);
+            });
+
+            // Configuración de la entidad ChartMark (marcas del gráfico de cotización, SPEC-05-03).
+            // Sin clave foránea: la baja de una empresa borra sus marcas desde CompanyService
+            modelBuilder.Entity<ChartMark>(entity =>
+            {
+                entity.ToTable("ChartMarks");
+
+                entity.HasIndex(e => new { e.CompanyId, e.Date })
+                    .HasDatabaseName("IX_ChartMarks_CompanyId_Date");
+
+                entity.Property(e => e.Description).IsRequired().HasMaxLength(200);
+            });
+
+            // Configuración de la entidad DividendPayment (calendario de dividendos, SPEC-21-01).
+            // Sin claves foráneas: la baja de una empresa borra sus líneas desde CompanyService
+            modelBuilder.Entity<DividendPayment>(entity =>
+            {
+                entity.ToTable("DividendPayments");
+
+                // Una sola línea por empresa y fecha de pago
+                entity.HasIndex(e => new { e.CompanyId, e.PaymentDate })
+                    .IsUnique()
+                    .HasDatabaseName("IX_DividendPayments_CompanyId_PaymentDate");
+
+                entity.HasIndex(e => e.OperationId)
+                    .HasDatabaseName("IX_DividendPayments_OperationId");
+
+                entity.Property(e => e.AmountPerShare).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.DividendPercent).HasColumnType("decimal(18,2)");
+                entity.Property(e => e.Status).IsRequired().HasMaxLength(20);
+                entity.Property(e => e.Source).IsRequired().HasMaxLength(20);
+                entity.Property(e => e.Notes).HasMaxLength(200);
+            });
+
+            // Configuración de los índices para comparar (SPEC-05-04). Sin claves foráneas: la baja de un índice
+            // borra sus puntos desde BenchmarkIndexService
+            modelBuilder.Entity<BenchmarkIndex>(entity =>
+            {
+                entity.ToTable("BenchmarkIndices");
+
+                entity.HasIndex(e => e.Symbol)
+                    .IsUnique()
+                    .HasDatabaseName("IX_BenchmarkIndices_Symbol");
+
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+                entity.Property(e => e.Symbol).IsRequired().HasMaxLength(20);
+            });
+
+            modelBuilder.Entity<BenchmarkPricePoint>(entity =>
+            {
+                entity.ToTable("BenchmarkPricePoints");
+
+                // Un punto por índice y fecha, para evitar duplicados y agilizar el upsert
+                entity.HasIndex(e => new { e.BenchmarkIndexId, e.Date })
+                    .IsUnique()
+                    .HasDatabaseName("IX_BenchmarkPricePoints_BenchmarkIndexId_Date");
             });
         }
     }

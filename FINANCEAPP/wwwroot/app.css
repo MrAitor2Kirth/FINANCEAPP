@@ -273,6 +273,29 @@ h1.sw > .bi { display: none; }
     border-radius: var(--radius);
 }
 .stat-card p { margin: 0; }
+.stat-card { display: flex; flex-direction: column; }
+
+/* Bloques de tarjetas de /companies (SPEC-01-08): rótulo de bloque, columnas fijas y línea secundaria */
+.stat-section {
+    margin: 0 0 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+}
+.stat-grid.stat-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 0.75rem; }
+.stat-grid.stat-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat-card.span-2 { grid-column: span 2; }
+.stat-sub { margin-top: 0.3rem !important; font-size: 0.85rem; color: var(--ink-soft); }
+.stat-value-unit { font-family: var(--font-body); font-size: 0.85rem; font-weight: 400; letter-spacing: 0; color: var(--ink-soft); }
+.stat-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 991.98px) {
+    /* La cartera sigue en tres columnas (una tarjeta suelta en otra fila queda mal); la rentabilidad pasa a 2 */
+    .stat-grid.stat-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 575.98px) {
+    .stat-grid.stat-grid-3, .stat-grid.stat-grid-4 { grid-template-columns: minmax(0, 1fr); }
+    .stat-card.span-2 { grid-column: auto; }
+}
 .stat-label {
     font-size: 0.72rem;
     font-weight: 600;
@@ -430,7 +453,9 @@ h1.sw > .bi { display: none; }
     font-size: 0.8rem;
     pointer-events: none;
     box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.3);
-    white-space: nowrap;
+    /* Las descripciones de las marcas pueden ser largas (SPEC-05-03) */
+    max-width: 24rem;
+    white-space: normal;
 }
 
 /* Gráfico de cotización: visor en vivo, operativa y capas (SPEC-05-01) */
@@ -438,6 +463,35 @@ h1.sw > .bi { display: none; }
     padding: 0.4rem 0.6rem;
     font-size: 0.8rem;
     font-family: var(--font-mono);
+}
+
+/* Serie auxiliar del tramo futuro: solo sostiene la escala, no se ve (SPEC-21-01) */
+.apexcharts-series[seriesName="Referencia"] { display: none; }
+
+/* Operaciones y marcas del día dentro del tooltip de cotización (SPEC-05-03) */
+.company-chart-tooltip-events {
+    margin-top: 0.35rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid var(--line);
+    max-width: 22rem;
+    white-space: normal;
+}
+
+.company-chart-tooltip-events > div + div { margin-top: 0.3rem; }
+
+/* Rombo del pago de dividendo en el tooltip y en la leyenda (SPEC-21-01) */
+.company-chart-tooltip-dot.is-diamond,
+.chart-legend-dot.dividend-payment { border-radius: 1px; transform: rotate(45deg) scale(0.85); }
+.chart-legend-dot.dividend-payment { color: #1F6FD1; }
+
+.company-chart-tooltip-dot {
+    display: inline-block;
+    width: 0.6rem;
+    height: 0.6rem;
+    border: 2px solid;
+    border-radius: 50%;
+    margin-right: 0.3rem;
+    vertical-align: -0.05rem;
 }
 
 .live-quote {
@@ -538,10 +592,76 @@ h1.sw > .bi { display: none; }
     vertical-align: -0.05rem;
 }
 
-.chart-legend-dot.buy { color: var(--indigo); }
+/* Colores de los marcadores del gráfico (SPEC-05-03): mismos valores que COLORS en companyChart.js */
+.chart-legend-dot.buy { color: #177A4D; }
 .chart-legend-dot.transfer { color: #6C63C7; }
-.chart-legend-dot.sell { color: var(--loss); border-radius: 2px; }
-.chart-legend-dot.dividend { color: var(--gain); background: var(--gain); }
+.chart-legend-dot.sell { color: #C23B2E; border-radius: 2px; }
+.chart-legend-dot.dividend { color: #1F6FD1; background: #1F6FD1; }
+.chart-legend-dot.mark { color: #8B5A2B; background: #8B5A2B; }
+.chart-legend-dot.mark-global { color: #8B5A2B; }
+
+/* Leyenda que filtra: cada tipo de operación es un botón; atenuado si está oculto */
+.chart-legend-item {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.1rem 0.4rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: none;
+    color: inherit;
+    font: inherit;
+}
+
+button.chart-legend-item { cursor: pointer; }
+button.chart-legend-item:hover { border-color: var(--line); }
+.chart-legend-item.is-hidden { opacity: 0.4; text-decoration: line-through; }
+.chart-legend-item.is-static { cursor: default; }
+
+/* Comparación de dos series en base 100 (SPEC-05-04): mismos colores que COLORS.line y COLORS.compared */
+.btn-compare { background: #E07B00; border-color: #E07B00; color: #fff; }
+.btn-compare:hover, .btn-compare:focus { background: #B86500; border-color: #B86500; color: #fff; }
+.compare-select { width: auto; max-width: 18rem; }
+.chart-legend-dot.comparison-main { color: #3F3B9B; background: #3F3B9B; border-radius: 2px; height: 0.25rem; }
+.chart-legend-dot.comparison-compared { color: #E07B00; background: #E07B00; border-radius: 2px; height: 0.25rem; }
+
+.chart-comparison-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 1.25rem;
+    font-size: 0.85rem;
+}
+
+.chart-comparison-item { display: inline-flex; align-items: center; gap: 0.25rem; }
+
+/* Marcas del gráfico (SPEC-05-03) */
+.btn-chart-mark { background: #8B5A2B; border-color: #8B5A2B; color: #fff; }
+.btn-chart-mark:hover, .btn-chart-mark:focus { background: #6F4721; border-color: #6F4721; color: #fff; }
+
+.mark-form {
+    border: 1px solid var(--line);
+    border-top: 3px solid #8B5A2B;
+    border-radius: var(--radius);
+    background: var(--paper);
+    padding: 1rem;
+}
+
+.mark-form .form-label { font-size: 0.8rem; margin-bottom: 0.2rem; color: var(--ink-soft); }
+
+.chart-marks-panel { font-size: 0.85rem; }
+.chart-marks-table { font-size: 0.85rem; }
+
+.mark-type {
+    display: inline-block;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid #8B5A2B;
+    color: #8B5A2B;
+}
+
+.mark-type.company { background: #8B5A2B; color: #fff; }
 
 .position-summary {
     display: flex;
@@ -804,3 +924,51 @@ a.history-card:hover { border-color: var(--swatch, var(--amber)); color: var(--i
 
 .capture-total { display: flex; flex-direction: column; margin-bottom: 0.75rem; }
 .capture-total-value { font-size: 1.8rem; font-weight: 500; letter-spacing: -0.02em; }
+
+/* Calendario de dividendos (SPEC-21-01) */
+.dividend-form { border-top: 3px solid #1F6FD1; }
+.dividend-form.generate { border-top-color: var(--gain); }
+.dividend-form .form-label { font-size: 0.8rem; margin-bottom: 0.2rem; color: var(--ink-soft); }
+
+.dividend-status {
+    display: inline-block;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid #1F6FD1;
+    color: #1F6FD1;
+}
+
+.dividend-status.collected { background: #1F6FD1; color: #fff; }
+
+/* Pendiente con la fecha de pago ya pasada: «Pago vencido, sin cobrar» */
+.dividends-table tr.dividend-overdue > td { background: rgba(194, 59, 46, 0.06); }
+.dividend-overdue-text { color: var(--loss); }
+
+.company-chart-navigator { margin-top: 0.25rem; }
+
+.home-dividends {
+    margin-bottom: 1.5rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--line);
+    border-left: 4px solid #1F6FD1;
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+
+.home-dividend-list { list-style: none; margin: 0; padding: 0; }
+.home-dividend-list li {
+    display: flex;
+    gap: 1rem;
+    align-items: baseline;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--line);
+}
+.home-dividend-list li:last-child { border-bottom: none; }
+.home-dividend-date { font-family: var(--font-mono); color: var(--ink-soft); min-width: 6.5rem; }
+.home-dividend-company { flex: 1; font-weight: 600; }
+.home-dividend-amount { font-family: var(--font-mono); }
+
+/* Edición de un movimiento bancario bajo su fila (antes el formulario quedaba al final, fuera de la vista) */
+.bank-edit-row > td { background: var(--surface); padding: 0.75rem 1rem; }

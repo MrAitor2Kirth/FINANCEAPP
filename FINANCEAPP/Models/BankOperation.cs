@@ -56,6 +56,28 @@ namespace FINANCEAPP.Models
         public string? Description { get; set; }
 
         /// <summary>
+        /// Id del registro del histórico de ventas cuya venta generó este ingreso (SPEC-02-04).
+        /// Vacío en los movimientos normales. Sin clave foránea, como el resto de enlaces.
+        /// Un movimiento con este campo no se edita ni se borra desde el banco.
+        /// </summary>
+        public int? SaleHistoryId { get; set; }
+
+        /// <summary>
+        /// Clave de la compra o Id del dividendo que generó este movimiento (SPEC-02-06): en una compra partida
+        /// por una venta es el Id del lote original (OriginOperationId ?? Id). Vacío en los movimientos normales
+        /// y en los de ventas. Sin clave foránea. Un movimiento con este campo, si su operación existe,
+        /// no se edita ni se borra desde el banco.
+        /// </summary>
+        public int? OperationId { get; set; }
+
+        /// <summary>
+        /// Identificador compartido por las dos patas de un traspaso entre cuentas (SPEC-10-02): el Traspaso Salida
+        /// y el Traspaso Entrada. Vacío en los movimientos normales y en los traspasos manuales anteriores.
+        /// Sin clave foránea. Las dos patas se editan (importe y fecha) y se borran juntas.
+        /// </summary>
+        public int? TransferId { get; set; }
+
+        /// <summary>
         /// Fecha de creación del registro
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.Now;

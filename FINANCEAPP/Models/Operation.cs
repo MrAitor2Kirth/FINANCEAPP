@@ -45,8 +45,10 @@ namespace FINANCEAPP.Models
         /// <summary>
         /// Número de acciones compradas o vendidas
         /// </summary>
+        [Column(TypeName = "decimal(18,2)")]
+        [Range(typeof(decimal), "0", "999999999.99", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true, ErrorMessage = "El número de acciones no puede ser negativo")]
         [Display(Name = "Número de Acciones")]
-        public int NumberOfShares { get; set; }
+        public decimal NumberOfShares { get; set; }
 
         /// <summary>
         /// Importe de comisiones asociadas a la operación

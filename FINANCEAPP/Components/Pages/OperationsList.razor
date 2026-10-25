@@ -5,6 +5,7 @@
 @inject ICompanyService CompanyService
 @inject ICountryService CountryService
 @inject IExchangeRateService ExchangeRateService
+@inject IBankService BankService
 
 <PageTitle>Operaciones Financieras</PageTitle>
 
@@ -119,7 +120,7 @@
                         <thead class="table-light">
                             <tr>
                                 <th scope="col" style="width: 50px;" class="text-center">#</th>
-                                <th scope="col" style="width: 250px;">
+                                <th scope="col" style="width: 190px;">
                                     <div class="d-flex align-items-center gap-2">
                                         <span>Empresa</span>
                                         <div class="dropdown">
@@ -146,17 +147,21 @@
                                         </div>
                                     </div>
                                 </th>
-                                <th scope="col" style="width: 150px;">Tipo</th>
-                                <th scope="col" style="width: 150px;" class="text-center">Fecha Apertura</th>
-                                <th scope="col" style="width: 150px;" class="text-center">Fecha Cierre</th>
-                                <th scope="col" style="width: 130px;" class="text-end">Precio/Acción</th>
-                                <th scope="col" style="width: 130px;" class="text-end">Precio en Vivo</th>
-                                <th scope="col" style="width: 110px;" class="text-end">Nº Acciones</th>
-                                <th scope="col" style="width: 110px;" class="text-end">Comisiones</th>
-                                <th scope="col" style="width: 130px;" class="text-end">Importe Total</th>
-                                <th scope="col" style="width: 110px;" class="text-center">Cód. divisa</th>
-                                <th scope="col" style="width: 100px;" class="text-center">Estado</th>
-                                <th scope="col" style="width: 140px;" class="text-center">Acciones</th>
+                                <th scope="col" style="width: 110px;">Tipo</th>
+                                @if (showBankColumn)
+                                {
+                                    <th scope="col" style="width: 150px;">Cuenta bancaria</th>
+                                }
+                                <th scope="col" style="width: 125px;" class="text-center">Fecha Apertura</th>
+                                <th scope="col" style="width: 125px;" class="text-center">Fecha Cierre</th>
+                                <th scope="col" style="width: 105px;" class="text-end">Precio/Acción</th>
+                                <th scope="col" style="width: 105px;" class="text-end">Precio en Vivo</th>
+                                <th scope="col" style="width: 90px;" class="text-end">Nº Acciones</th>
+                                <th scope="col" style="width: 90px;" class="text-end">Comisiones</th>
+                                <th scope="col" style="width: 110px;" class="text-end">Importe Total</th>
+                                <th scope="col" style="width: 90px;" class="text-center">Cód. divisa</th>
+                                <th scope="col" style="width: 90px;" class="text-center">Estado</th>
+                                <th scope="col" style="width: 120px;" class="text-center">Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -184,12 +189,62 @@
                                             }
                                         </td>
                                         <td>
-                                            <select class="form-select form-select-sm" @bind="editOperation.Type" @bind:after="OnTypeChanged">
+                                            <select class="form-select form-select-sm" @bind="editOperation.Type" @bind:after="OnTypeChanged" disabled="@(editLinkedAccountName != null)">
                                                 <option value="Compra">Compra</option>
                                                 <option value="Venta">Venta</option>
                                                 <option value="Dividendo">Dividendo</option>
                                                 <option value="Traspaso">Traspaso</option>
                                             </select>
+                                        </td>
+                                        <td>
+                                            @* Cuenta donde se ingresa la liquidez de la venta (SPEC-02-04); vacía = la más antigua *@
+                                            @if (operation.Id == 0 && editOperation.Type == "Venta")
+                                            {
+                                                @if (bankAccounts.Count == 0)
+                                                {
+                                                    <small class="text-danger d-block mt-1">Crea una cuenta bancaria en Banco antes de vender.</small>
+                                                }
+                                                else
+                                                {
+                                                    <select class="form-select form-select-sm" @bind="editBankAccountName" aria-label="Cuenta bancaria">
+                                                        <option value="">Por defecto: @defaultBankAccountName</option>
+                                                        @foreach (var account in bankAccounts)
+                                                        {
+                                                            <option value="@account.Name">@account.Name</option>
+                                                        }
+                                                    </select>
+                                                }
+                                            }
+                                            @* Cuenta del movimiento de una Compra (Gasto) o Dividendo (Ingreso) (SPEC-02-06 y SPEC-02-07):
+                                               alta = por defecto o «No registrar»; edición con movimiento = «Mantener» o cambiar de cuenta;
+                                               edición sin movimiento = «Sin movimiento» o asignar cuenta (solo si no está cerrada) *@
+                                            @if (OperationAmountCalculator.GeneratesBankMovement(editOperation.Type) && bankAccounts.Count > 0
+                                                 && (operation.Id == 0 || editLinkedAccountName != null || !editOperationCloseDate.HasValue))
+                                            {
+                                                <select class="form-select form-select-sm" @bind="editBankAccountName" aria-label="Cuenta bancaria">
+                                                    @if (operation.Id == 0)
+                                                    {
+                                                        <option value="">Por defecto: @defaultBankAccountName</option>
+                                                        <option value="@OperationAmountCalculator.NoBankMovementValue">No registrar en banco</option>
+                                                    }
+                                                    else if (editLinkedAccountName != null)
+                                                    {
+                                                        <option value="">Mantener (@editLinkedAccountName)</option>
+                                                    }
+                                                    else
+                                                    {
+                                                        <option value="">Sin movimiento</option>
+                                                    }
+                                                    @foreach (var account in bankAccounts)
+                                                    {
+                                                        <option value="@account.Name">@account.Name</option>
+                                                    }
+                                                </select>
+                                            }
+                                            else if (!(operation.Id == 0 && editOperation.Type == "Venta"))
+                                            {
+                                                <span class="text-muted">-</span>
+                                            }
                                         </td>
                                         <td>
                                             <InputDate class="form-control form-control-sm" 
@@ -229,7 +284,9 @@
                                                    @bind="editNumberOfShares"
                                                    @bind:event="oninput"
                                                    @bind:after="RecalculateAmount"
-                                                   step="1"
+                                                   step="0.01"
+                                                   min="0"
+                                                   inputmode="decimal"
                                                    placeholder="0" />
                                         </td>
                                         <td>
@@ -317,6 +374,19 @@
                                                 @operation.Type
                                             </span>
                                         </td>
+                                        @if (showBankColumn)
+                                        {
+                                            <td class="align-middle">
+                                                @if (OperationAmountCalculator.GeneratesBankMovement(operation.Type) && tradeMovementAccounts.TryGetValue(OperationAmountCalculator.GetTradeMovementKey(operation), out var movementAccount))
+                                                {
+                                                    <span class="small"><i class="bi bi-bank me-1 text-muted"></i>@movementAccount</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">-</span>
+                                                }
+                                            </td>
+                                        }
                                         <td class="text-center align-middle">
                                             @operation.Date.ToString("dd/MM/yyyy")
                                         </td>
@@ -342,7 +412,7 @@
                                                 <span class="text-muted">N/D</span>
                                             }
                                         </td>
-                                        <td class="text-end align-middle">@operation.NumberOfShares.ToString("N4")</td>
+                                        <td class="text-end align-middle">@ShareQuantity.Format(operation.NumberOfShares)</td>
                                         <td class="text-end align-middle">@CurrencyFormatter.Format(operation.Commission, operation.EffectiveCurrencyCode)</td>
                                         <td class="text-end align-middle">
                                             <strong class="text-primary">@CurrencyFormatter.Format(operation.Amount, operation.EffectiveCurrencyCode)</strong>
@@ -497,7 +567,8 @@
     // Campos desglosados del importe
     private decimal editPricePerShare = 0;
     private decimal editLivePrice = 0;
-    private int editNumberOfShares = 0;
+    // Acciones con hasta 2 decimales (SPEC-02-08)
+    private decimal editNumberOfShares = 0;
     private decimal editCommission = 0;
     private decimal editCalculatedAmount = 0;
     private bool isRefreshingSelectedCompanyLivePrice = false;
@@ -508,6 +579,18 @@
     // Mensaje de error visible en pantalla
     private string? errorMessage;
     private string? editWarning;
+
+    // Cuentas para ingresar la liquidez de una Venta nueva (SPEC-02-04)
+    private List<BankAccount> bankAccounts = new();
+    private string? defaultBankAccountName;
+    private string editBankAccountName = string.Empty;
+
+    // Movimientos bancarios de Compras y Dividendos (SPEC-02-06): clave de la operación → cuenta
+    private Dictionary<int, string> tradeMovementAccounts = new();
+    private string? editLinkedAccountName;
+
+    // La columna «Cuenta bancaria» solo se ve mientras hay una fila en alta o edición (SPEC-02-07)
+    private bool showBankColumn => editingOperationId.HasValue;
 
     // Métricas calculadas
     private List<Operation> filteredOperations =>
@@ -581,6 +664,12 @@
             operations = await OperationService.GetAllAsync();
             companies = await CompanyService.GetAllAsync();
             baseCurrency = await CountryService.GetBaseCurrencyAsync();
+            bankAccounts = await BankService.GetAllBankAccountsAsync();
+            defaultBankAccountName = (await BankService.GetDefaultBankAccountAsync())?.Name;
+            tradeMovementAccounts = await BankService.GetTradeMovementAccountsAsync(
+                operations
+                    .Where(o => OperationAmountCalculator.GeneratesBankMovement(o.Type))
+                    .Select(OperationAmountCalculator.GetTradeMovementKey));
         }
         catch (Exception ex)
         {
@@ -599,6 +688,7 @@
     private void AddNewOperation()
     {
         errorMessage = null;
+        editBankAccountName = string.Empty;
         var newOperation = new Operation
         {
             Id = 0, // ID temporal para nueva operación
@@ -649,6 +739,12 @@
         if (status == "Cerrada")
         {
             editOperationCloseDate ??= DateTime.Today;
+
+            // Una operación cerrada sin movimiento no admite cuenta (SPEC-02-07): se descarta la elegida
+            if (editingOperationId != 0 && editLinkedAccountName == null)
+            {
+                editBankAccountName = string.Empty;
+            }
         }
         else
         {
@@ -661,9 +757,20 @@
     /// </summary>
     private void StartEdit(Operation operation)
     {
+        // En una fila existente, vacío = mantener la cuenta del movimiento o seguir sin movimiento (SPEC-02-07)
+        if (operation.Id != 0)
+        {
+            editBankAccountName = string.Empty;
+        }
+
         editWarning = null;
         errorMessage = null;
         editingOperationId = operation.Id;
+        editLinkedAccountName = operation.Id != 0
+            && OperationAmountCalculator.GeneratesBankMovement(operation.Type)
+            && tradeMovementAccounts.TryGetValue(OperationAmountCalculator.GetTradeMovementKey(operation), out var linkedAccount)
+                ? linkedAccount
+                : null;
         editOperation = new Operation
         {
             Id = operation.Id,
@@ -704,6 +811,7 @@
         }
 
         editingOperationId = null;
+        editLinkedAccountName = null;
         editOperation = new();
         editOperationDate = DateTime.Now;
         editOperationCloseDate = null;
@@ -764,7 +872,7 @@
                     // La venta cierra compras por FIFO y se guarda en el histórico.
                     // Precio de venta: manda el precio por acción si está informado; si no, el precio en vivo.
                     var sellPrice = basePrice ?? editPricePerShare;
-                    var result = await OperationService.RegisterSaleAsync(editOperation, sellPrice);
+                    var result = await OperationService.RegisterSaleAsync(editOperation, sellPrice, editBankAccountName);
                     if (!result.Success)
                     {
                         errorMessage = result.ErrorMessage;
@@ -773,7 +881,7 @@
                 }
                 else
                 {
-                    await OperationService.AddAsync(editOperation);
+                    await OperationService.AddAsync(editOperation, editBankAccountName);
                 }
 
                 // Recargar la lista completa
@@ -782,7 +890,7 @@
             else
             {
                 // Actualizar operación existente
-                var success = await OperationService.UpdateAsync(editOperation);
+                var success = await OperationService.UpdateAsync(editOperation, editBankAccountName);
                 if (success)
                 {
                     // Actualizar en la lista local
@@ -911,6 +1019,9 @@
     /// </summary>
     private void OnTypeChanged()
     {
+        // «No registrar en banco» solo vale para Compra y Dividendo: al cambiar de tipo se vuelve a la cuenta por defecto
+        editBankAccountName = string.Empty;
+
         if (editCalculatedAmount <= 0)
         {
             RecalculateAmount();
